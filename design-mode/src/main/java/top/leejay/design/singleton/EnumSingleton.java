@@ -1,7 +1,7 @@
 package top.leejay.design.singleton;
 
 /**
- * @author Li Jie
+ * @author xiaokexiang
  * @date 5/18/2020
  * 枚举单例
  * 使用枚举单例原因：

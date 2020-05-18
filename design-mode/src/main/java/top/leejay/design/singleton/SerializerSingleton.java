@@ -3,7 +3,7 @@ package top.leejay.design.singleton;
 import java.io.Serializable;
 
 /**
- * @author Li Jie
+ * @author xiaokexiang
  * @date 5/18/2020
  */
 public class SerializerSingleton implements Serializable {

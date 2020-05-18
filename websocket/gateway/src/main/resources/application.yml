@@ -1,0 +1,20 @@
+server:
+  port: 9000
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: ofm-basic1
+          uri: lb://ofm-basic1
+          predicates:
+            - Path=/index
+        - id: websocket1
+          uri: lb:ws://ofm-basic1
+          predicates:
+            - Path=/websocket1/**
+        - id: websocket2
+            uri: lb:ws://ofm-basic2
+            predicates:
+            - Path=/websocket2/**
+  application:
+    name: ofm-gateway

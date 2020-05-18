@@ -1,7 +1,7 @@
 package top.leejay.design.singleton;
 
 /**
- * @author Li Jie
+ * @author xiaokexiang
  * @date 5/18/2020
  * 单例：懒汉式(只有当你调用的时候，发现没有才去创建) 线程不安全
  * 多线程情况下，当线程A判断 singleton = null 时准备创建对象，此时线程B获取了cpu执行权，也发现 singleton = null 也去创建对象，

@@ -1,7 +1,7 @@
 package top.leejay.design.singleton;
 
 /**
- * @author Li Jie
+ * @author xiaokexiang
  * @date 5/18/2020
  * 反射导致单例失效
  */

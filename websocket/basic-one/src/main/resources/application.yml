@@ -1,0 +1,9 @@
+server:
+  port: 8081
+eureka:
+  client:
+    service-url:
+      default-zone: http://localhost:8761
+spring:
+  application:
+    name: ofm-basic1

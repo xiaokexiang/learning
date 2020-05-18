@@ -1,7 +1,7 @@
 package top.leejay.design.singleton;
 
 /**
- * @author Li Jie
+ * @author xiaokexiang
  * @date 5/18/2020
  * 利用静态内部类实现单例 线程安全
  * 缺点：因为是静态内部类，对于传参不友好。

@@ -1,7 +1,7 @@
 package top.leejay.design.singleton;
 
 /**
- * @author Li Jie
+ * @author xiaokexiang
  * @date 5/18/2020
  * 双重确认singleton
  * 饿汉和懒汉单例都存在缺点，如果为了保证多线程情况下单例的一致性，我们基于懒汉式单例创建双重确认单例。
