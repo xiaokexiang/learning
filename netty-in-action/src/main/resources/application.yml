@@ -1,0 +1,8 @@
+spring:
+  application:
+    name: netty-in-action
+server:
+  port: 8083
+
+
+
