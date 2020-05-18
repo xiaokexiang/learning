@@ -1,0 +1,5 @@
+spring:
+  application:
+    name: binary-tree
+server:
+  port: 8080
