@@ -4,7 +4,7 @@
 <a href="./binary-tree/README.md">1. 二叉树</a>
 
 ### 设计模式
-<a href="./singleton/README.md">设计模式</a>
+<a href="./design-mode/README.md">设计模式</a>
 
 ### I/O模型相关概念
 <a href="./articles/sync.md">同步、异步与阻塞非阻塞</a>
