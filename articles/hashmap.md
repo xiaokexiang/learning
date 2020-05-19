@@ -89,7 +89,7 @@ public V put(K key, V value) {
 static final int hash(Object key) {
     int h;
     // key.hashCode()是nactive方法，不同的JVM有不同的实现
-    // 将h的高16位和低16位进行与运算，这样保证每个bit都能参与运算
+    // 将h的高16位和低16位进行异或运算，这样保证每个bit都能参与运算
     return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
 }
 

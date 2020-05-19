@@ -2,6 +2,9 @@ package top.leejay.learning;
 
 import com.alibaba.fastjson.JSONObject;
 import com.google.common.collect.Lists;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.ToString;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import top.leejay.learning.entity.TreeNode;
@@ -9,6 +12,7 @@ import top.leejay.learning.service.TreeNodeUtil;
 
 import java.util.List;
 
+@Data
 @SpringBootTest
 class BinaryTreeApplicationTests {
 
