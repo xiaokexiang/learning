@@ -69,7 +69,7 @@ static final int tableSizeFor(int cap) {
 > 1. HashMap的`initCapacity`范围：`[0, 1<<30]`。
 > 2. HashMap默认负载因子为`0.75F`。
 > 3. 初始化时扩容阈值为大于或等于`initialCapacity`的最小的2的幂次方(15 -> 16)。
-> 4. HashMap此时只是设置了扩容阈值，还没有初始化数组(在put时初始化)，目的是防止创建了HashMap却不用导致占内存。
+> 4. HashMap此时只是`设置了扩容阈值，还没有初始化数组(在put时初始化)`，目的是防止创建了HashMap却不用导致占内存。
 
 #### tableSizeFor()
 
@@ -131,19 +131,25 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
     Node<K,V>[] tab; Node<K,V> p; int n, i;
     // 如果当前table数组为空或null
     if ((tab = table) == null || (n = tab.length) == 0)
-        // 初始化table[]数组并设置相关参数，具体跳转下面resize()解析
+        // 初始化table[]数组并设置相关参数，具体的跳转下面resize()解析
         n = (tab = resize()).length;
-    // 计算要保存的数据的索引，如果当前位置(tbale[i])没有数据就创建Node<k,v>并保存
+    // 计算数据保存的索引，如果table[i] = null就创建Node<k,v>并保存
     if ((p = tab[i = (n - 1) & hash]) == null)
         tab[i] = newNode(hash, key, value, null);
     else {
+        // table[i]存在数据，定义e为临时节点，k为临时key
         Node<K,V> e; K k;
+        // p=table[i]（即当前位置已占位的节点）
+        // 1. 判断新增node与p的hash、key是否相同，相同则需要用新值覆盖旧值
         if (p.hash == hash &&
             ((k = p.key) == key || (key != null && key.equals(k))))
             e = p;
+        // 2. 判断p是否是TreeNode的子类
         else if (p instanceof TreeNode)
+            // 红黑树添加，如果添加成功就返回null，如果树存在相同的key就返回该新增节点
             e = ((TreeNode<K,V>)p).putTreeVal(this, tab, hash, key, value);
         else {
+            // 
             for (int binCount = 0; ; ++binCount) {
                 if ((e = p.next) == null) {
                     p.next = newNode(hash, key, value, null);
@@ -157,6 +163,7 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
                 p = e;
             }
         }
+        // 如果e不为null，说明此次的key是重复的，所以需要新值覆盖旧值
         if (e != null) { // existing mapping for key
             V oldValue = e.value;
             if (!onlyIfAbsent || oldValue == null)
@@ -165,10 +172,13 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
             return oldValue;
         }
     }
+    // modCount：HashMap结构修改次数+1
     ++modCount;
+    // 如果超过扩容阈值就调用resize()扩容
     if (++size > threshold)
         resize();
     afterNodeInsertion(evict);
+    // 返回null表明添加成功
     return null;
 }
 
