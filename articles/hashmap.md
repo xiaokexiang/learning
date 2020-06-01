@@ -2,7 +2,7 @@
 
 >  什么是HashMap?
 >
->  HashMap是基于哈希表的Map接口的非同步实现，其本质上是`数组 + 链表(或二叉树)`的结合，它允许使用null值和null键，且不保证映射顺序。
+>  HashMap是基于哈希表的Map接口的`非同步实现`，其本质上是`数组 + 链表(或红黑树)`的结合，它允许使用null值和null键，且`不保证映射顺序`。
 >
 >  HashMap采用的`链地址法的Hash算法`，即存在相同的hash值时使用next指针将Node节点构建成链表结构进行保存。
 
@@ -14,7 +14,7 @@
 // 在构造函数未指定时使用的负载因子
 static final float DEFAULT_LOAD_FACTOR = 0.75f;
 
-// 最大容量， 初始容量范围：2 < initialCapacity <= 1<<30
+// 最大容量， 初始容量范围：0 <= initialCapacity <= 1<<30
 static final int MAXIMUM_CAPACITY = 1 << 30;
 
 // 下一次扩容的阈值，默认(capacity * load factor)计算得出
@@ -116,16 +116,6 @@ static class Node<K,V> implements Map.Entry<K,V> {
     ....
 }
 
-/**
-  * Implements Map.put and related methods
-  *
-  * @param hash hash for key
-  * @param key the key
-  * @param value the value to put
-  * @param onlyIfAbsent if true, don't change existing value
-  * @param evict if false, the table is in creation mode.
-  * @return previous value, or null if none
-  */
 final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
                    boolean evict) {
     Node<K,V>[] tab; Node<K,V> p; int n, i;
@@ -144,22 +134,27 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
         if (p.hash == hash &&
             ((k = p.key) == key || (key != null && key.equals(k))))
             e = p;
-        // 2. 判断p是否是TreeNode的子类
+        // 2. 判断p是否是TreeNode的子类，说明此处已经是红黑树
         else if (p instanceof TreeNode)
             // 红黑树添加，如果添加成功就返回null，如果树存在相同的key就返回该新增节点
             e = ((TreeNode<K,V>)p).putTreeVal(this, tab, hash, key, value);
         else {
-            // 
+            // jdk1.8之前是头插法，会导致链表循环，1.8换成尾插法
+            // 循环判断新增节点e的next节点是否为null
             for (int binCount = 0; ; ++binCount) {
                 if ((e = p.next) == null) {
+                    // 如果为null，直接尾插
                     p.next = newNode(hash, key, value, null);
+                    // 判断链表数量是否超过阈值(默认8)，超过转为红黑树
                     if (binCount >= TREEIFY_THRESHOLD - 1) // -1 for 1st
                         treeifyBin(tab, hash);
                     break;
                 }
+                // 如果存在相同的key，结束循环，在外层进行值替换
                 if (e.hash == hash &&
                     ((k = e.key) == key || (key != null && key.equals(k))))
                     break;
+                // 设置p为下一个节点
                 p = e;
             }
         }
@@ -181,62 +176,100 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
     // 返回null表明添加成功
     return null;
 }
+```
 
+> 总结：
+>
+> 1. 如果调用put()方法时，table[]桶还没有初始化，调用`resize()`进行初始化。
+> 2.  put()通过`index = (capicity - 1) & key.hashCode()`计算脚标存放node。
+> 3. jdk8之后put()使用的是`尾插法`，之前使用的是`头插法`，`头插法在多线程情况下会导致环形链表，出现get()的时候导致死循环`。使用尾插法在多线程情况下最多是丢失数据，不会出现死循环。
+> 4.  如果`node链表的数量大于等于8`时，会将`node链表转成红黑树`。
+> 5. put()方法包含三种情况：key相同的值覆盖 & TreeNode插入红黑树 & Node插入链表。
+> 6. 每put一次都会计算是否需要扩容，默认cap:16，threshold:12，当插入第12个值完成时会扩容。
+
+
+
+### 3. resize()
+
+```java
 /**
- * 如果table为null就初始化表并设置扩容阈值，否则对表进行2次幂扩容，
- * 扩容后元素索引与扩容前一致或者2次幂偏移。
+ * 1. 如果table为null就初始化表并设置扩容阈值。
+ * 2. table不为null则对表进行2次幂扩容，扩容后元素索引与扩容前一致或者2次幂偏移。
  */
 final Node<K,V>[] resize() {
     // 将当前table赋值给oldTab(简称旧表)
     Node<K,V>[] oldTab = table;
-    // 设置旧表的容量，旧表不存在就为0
+    // 设置旧表的容量，旧表不存在就为0(初始化状态)
     int oldCap = (oldTab == null) ? 0 : oldTab.length;
     // 将当前的扩容阈值设置给oldThr(简称旧阈值)
     int oldThr = threshold;
     // 初始化新表容量和新阈值
     int newCap, newThr = 0;
-    // 排除oldCap<=0的情况
+    // 说明此时的resize()是非初始化扩容
     if (oldCap > 0) {
         // 如果oldCap超过最大值就设置阈值并返回，因为无法再扩容
         if (oldCap >= MAXIMUM_CAPACITY) {
             threshold = Integer.MAX_VALUE;
             return oldTab;
         }
+        // 如果扩容两倍小于max_cap且old_cap大于16
         else if ((newCap = oldCap << 1) < MAXIMUM_CAPACITY &&
                  oldCap >= DEFAULT_INITIAL_CAPACITY)
-            newThr = oldThr << 1; // double threshold
+            // 将threshold 设置为原来两倍
+            newThr = oldThr << 1;
     }
-    else if (oldThr > 0) // initial capacity was placed in threshold
+    // 此时说明oldCap.length = 0，table没有初始化且之前代码设置过threshold，
+    // 优先将threshold赋值给newCap(有参构造会出现该情况)
+    else if (oldThr > 0) 
         newCap = oldThr;
-    else {               // zero initial threshold signifies using defaults
-        newCap = DEFAULT_INITIAL_CAPACITY;
-        newThr = (int)(DEFAULT_LOAD_FACTOR * DEFAULT_INITIAL_CAPACITY);
+    // 到这里说明没有设置过threshold且table没有初始化(无参构造会有这情况)
+    else {               
+        // 将cap&threshold赋予默认值
+        newCap = DEFAULT_INITIAL_CAPACITY;// 16
+        newThr = (int)(DEFAULT_LOAD_FACTOR * DEFAULT_INITIAL_CAPACITY);// 16 * 0.75
     }
+    // 有参构造才会走到这步，继续设置newThr
     if (newThr == 0) {
+        // 计算newThr = newCap * loadFactor
         float ft = (float)newCap * loadFactor;
         newThr = (newCap < MAXIMUM_CAPACITY && ft < (float)MAXIMUM_CAPACITY ?
                   (int)ft : Integer.MAX_VALUE);
     }
+    // 赋值给threshold
     threshold = newThr;
     @SuppressWarnings({"rawtypes","unchecked"})
+    // 至此：新的cap & threshold计算完毕,创建新的table[]
     Node<K,V>[] newTab = (Node<K,V>[])new Node[newCap];
     table = newTab;
+    // 如果oldTab != null，要进行rehash()操作
     if (oldTab != null) {
+        // 遍历获取里面每一个table[j](hashMap允许存在null键)
         for (int j = 0; j < oldCap; ++j) {
             Node<K,V> e;
             if ((e = oldTab[j]) != null) {
+                // 将oldTab对应位置置为null
                 oldTab[j] = null;
+                // 如果next不存在node
                 if (e.next == null)
+                    // 计算新的index并设置值
                     newTab[e.hash & (newCap - 1)] = e;
+                // 判断e是否是树节点
                 else if (e instanceof TreeNode)
+                    // 将红黑树节点rehash后放到新的地址
                     ((TreeNode<K,V>)e).split(this, newTab, j, oldCap);
-                else { // preserve order
+                // 如果不是红黑树结构且e.next不为null，进行链表复制
+                else {
+                    // 操作逻辑: 判断某个index上是否存在链表，如果存在，根据(e.hash & oldCap)
+                    // 进行判断， 不移位则index不变，移位则index + oldCap作为新的脚标
+                    // 具体可看下图3.1
                     Node<K,V> loHead = null, loTail = null;
                     Node<K,V> hiHead = null, hiTail = null;
                     Node<K,V> next;
                     do {
                         next = e.next;
+                        // 判断是否需要移位 具体可看下图3.2
                         if ((e.hash & oldCap) == 0) {
+                            // 将不需要移位的node转成链表(这里不处理红黑树是因为最多8个)
                             if (loTail == null)
                                 loHead = e;
                             else
@@ -244,6 +277,7 @@ final Node<K,V>[] resize() {
                             loTail = e;
                         }
                         else {
+                            // 需要处理移位，并将需要处理的node转成链表
                             if (hiTail == null)
                                 hiHead = e;
                             else
@@ -253,10 +287,12 @@ final Node<K,V>[] resize() {
                     } while ((e = next) != null);
                     if (loTail != null) {
                         loTail.next = null;
+                        // 不移位：将不需要移位构成的链表赋值给table[j]
                         newTab[j] = loHead;
                     }
                     if (hiTail != null) {
                         hiTail.next = null;
+                        // 移位: 将需要处理移位构成的新的链表赋值给table[j + oldCap]
                         newTab[j + oldCap] = hiHead;
                     }
                 }
@@ -266,3 +302,80 @@ final Node<K,V>[] resize() {
     return newTab;
 }
 ```
+
+### 4. 红黑树相关
+
+```java
+
+final TreeNode<K,V> putTreeVal(HashMap<K,V> map, Node<K,V>[] tab,
+                               int h, K k, V v) {
+    Class<?> kc = null;
+    boolean searched = false;
+    TreeNode<K,V> root = (parent != null) ? root() : this;
+    for (TreeNode<K,V> p = root;;) {
+        int dir, ph; K pk;
+        if ((ph = p.hash) > h)
+            dir = -1;
+        else if (ph < h)
+            dir = 1;
+        else if ((pk = p.key) == k || (k != null && k.equals(pk)))
+            return p;
+        else if ((kc == null &&
+                  (kc = comparableClassFor(k)) == null) ||
+                 (dir = compareComparables(kc, k, pk)) == 0) {
+            if (!searched) {
+                TreeNode<K,V> q, ch;
+                searched = true;
+                if (((ch = p.left) != null &&
+                     (q = ch.find(h, k, kc)) != null) ||
+                    ((ch = p.right) != null &&
+                     (q = ch.find(h, k, kc)) != null))
+                    return q;
+            }
+            dir = tieBreakOrder(k, pk);
+        }
+
+        TreeNode<K,V> xp = p;
+        if ((p = (dir <= 0) ? p.left : p.right) == null) {
+            Node<K,V> xpn = xp.next;
+            TreeNode<K,V> x = map.newTreeNode(h, k, v, xpn);
+            if (dir <= 0)
+                xp.left = x;
+            else
+                xp.right = x;
+            xp.next = x;
+            x.parent = x.prev = xp;
+            if (xpn != null)
+                ((TreeNode<K,V>)xpn).prev = x;
+            moveRootToFront(tab, balanceInsertion(root, x));
+            return null;
+        }
+    }
+}
+
+final void treeifyBin(Node<K,V>[] tab, int hash) {
+    int n, index; Node<K,V> e;
+    if (tab == null || (n = tab.length) < MIN_TREEIFY_CAPACITY)
+        resize();
+    else if ((e = tab[index = (n - 1) & hash]) != null) {
+        TreeNode<K,V> hd = null, tl = null;
+        do {
+            TreeNode<K,V> p = replacementTreeNode(e, null);
+            if (tl == null)
+                hd = p;
+            else {
+                p.prev = tl;
+                tl.next = p;
+            }
+            tl = p;
+        } while ((e = e.next) != null);
+        if ((tab[index] = hd) != null)
+            hd.treeify(tab);
+    }
+}
+```
+
+
+
+
+
