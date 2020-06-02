@@ -185,7 +185,8 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
 > 3. jdk8之后put()使用的是`尾插法`，之前使用的是`头插法`，`头插法在多线程情况下会导致环形链表，出现get()的时候导致死循环`。使用尾插法在多线程情况下最多是丢失数据，不会出现死循环。
 > 4.  如果`node链表的数量大于等于8`时，会将`node链表转成红黑树`。
 > 5. put()方法包含三种情况：key相同的值覆盖 & TreeNode插入红黑树 & Node插入链表。
-> 6. 每put一次都会计算是否需要扩容，默认cap:16，threshold:12，当插入第12个值完成时会扩容。
+> 6. 红黑树：查询快，插入慢，链表相反：查询慢，插入快。
+> 7. 每put一次都会计算是否需要扩容，默认cap:16，threshold:12，当插入第12个值完成时会扩容。
 
 
 
@@ -303,79 +304,63 @@ final Node<K,V>[] resize() {
 }
 ```
 
-### 4. 红黑树相关
+![图3.1](https://image.leejay.top/image/20200602/wASwgukyaekV.png?imageslim)
+
+![](https://image.leejay.top/image/20200602/9p82dKyqCGPA.png?imageslim)
+
+> 总结：
+>
+> 1. resize()包括`计算扩容后cap & threshold、rehash对元素进行重新分布`两个部分。
+> 2. 如果HashMap还没有初始化，resize()会将其初始化。如果没有通过构造函数设置cap & threshold，则会设置默认的(cap=16 & threshold=12)。
+> 3. 扩容遵守`newCap = oldCap * 2`公式，扩容过程中有的节点要么不会移位，要么按照(oldCap + i)进行平移。
+
+### 4. get()
 
 ```java
-
-final TreeNode<K,V> putTreeVal(HashMap<K,V> map, Node<K,V>[] tab,
-                               int h, K k, V v) {
-    Class<?> kc = null;
-    boolean searched = false;
-    TreeNode<K,V> root = (parent != null) ? root() : this;
-    for (TreeNode<K,V> p = root;;) {
-        int dir, ph; K pk;
-        if ((ph = p.hash) > h)
-            dir = -1;
-        else if (ph < h)
-            dir = 1;
-        else if ((pk = p.key) == k || (k != null && k.equals(pk)))
-            return p;
-        else if ((kc == null &&
-                  (kc = comparableClassFor(k)) == null) ||
-                 (dir = compareComparables(kc, k, pk)) == 0) {
-            if (!searched) {
-                TreeNode<K,V> q, ch;
-                searched = true;
-                if (((ch = p.left) != null &&
-                     (q = ch.find(h, k, kc)) != null) ||
-                    ((ch = p.right) != null &&
-                     (q = ch.find(h, k, kc)) != null))
-                    return q;
-            }
-            dir = tieBreakOrder(k, pk);
-        }
-
-        TreeNode<K,V> xp = p;
-        if ((p = (dir <= 0) ? p.left : p.right) == null) {
-            Node<K,V> xpn = xp.next;
-            TreeNode<K,V> x = map.newTreeNode(h, k, v, xpn);
-            if (dir <= 0)
-                xp.left = x;
-            else
-                xp.right = x;
-            xp.next = x;
-            x.parent = x.prev = xp;
-            if (xpn != null)
-                ((TreeNode<K,V>)xpn).prev = x;
-            moveRootToFront(tab, balanceInsertion(root, x));
-            return null;
-        }
-    }
+public V get(Object key) {
+    Node<K,V> e;
+    // 传入key.hashCode & key
+    return (e = getNode(hash(key), key)) == null ? null : e.value;
 }
 
-final void treeifyBin(Node<K,V>[] tab, int hash) {
-    int n, index; Node<K,V> e;
-    if (tab == null || (n = tab.length) < MIN_TREEIFY_CAPACITY)
-        resize();
-    else if ((e = tab[index = (n - 1) & hash]) != null) {
-        TreeNode<K,V> hd = null, tl = null;
-        do {
-            TreeNode<K,V> p = replacementTreeNode(e, null);
-            if (tl == null)
-                hd = p;
-            else {
-                p.prev = tl;
-                tl.next = p;
-            }
-            tl = p;
-        } while ((e = e.next) != null);
-        if ((tab[index] = hd) != null)
-            hd.treeify(tab);
-    }
+static final int hash(Object key) {
+    int h;
+    return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
 }
+// HashMap中table[]桶
+transient Node<K,V>[] table;
+
+// 传入key.hashCode & key
+final Node<K,V> getNode(int hash, Object key) {
+        Node<K,V>[] tab; Node<K,V> first, e; int n; K k;
+    	// table[]不为null且存在元素 && table[(n-1)&hash]不为null
+        if ((tab = table) != null && (n = tab.length) > 0 &&
+            (first = tab[(n - 1) & hash]) != null) {
+            // 判断table[i]的hash & key 是否相等，相等返回该节点
+            if (first.hash == hash && // always check first node
+                ((k = first.key) == key || (key != null && key.equals(k))))
+                return first;
+            // 如果不相等继续查看first是否有next节点
+            if ((e = first.next) != null) {
+                // 如果是红黑树，则进行红黑树find
+                if (first instanceof TreeNode)
+                    return ((TreeNode<K,V>)first).getTreeNode(hash, key);
+                // 如果是链表，进行循环查找
+                do {
+                    if (e.hash == hash &&
+                        ((k = e.key) == key || (key != null && key.equals(k))))
+                        return e;
+                } while ((e = e.next) != null);
+            }
+        }
+    	// 找不到直接返回null
+        return null;
+    }
 ```
 
-
+> 总结:
+>
+> 1. 相比put()，get()理解简单，就是通过`key.hash & (cap -1)`计算，如果table[i]没有，就获取table[i].next，按照红黑树或链表进行查找。
 
 
 
