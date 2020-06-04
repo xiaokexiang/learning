@@ -17,11 +17,11 @@ public class DoubleCheckSingleton {
      * 在JVM是分成三步的：
      * 1. 开辟空间分配内存
      * 2. 初始化对象
-     * 3. 创建指针指向分配的内存地址
+     * 3. 将singleton引用指向分配的内存地址
      *
      * 在不使用volatile时，可能被JVM优化成
      * 1. 开辟空间分配内存
-     * 3. 创建指针指向分配的内存地址
+     * 3. 将singleton引用指向分配的内存地址
      * 2. 初始化对象
      *
      * 那么当线程A执行1&3步的时候，线程B获取了CPU执行权，去45行验证`null == singleton`，

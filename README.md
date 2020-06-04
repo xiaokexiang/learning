@@ -20,3 +20,6 @@
 
 ### 算法复杂度
 <a href="./articles/complexity.md">算法复杂度</a>
+
+### 多线程知识点
+<a href="./articles/thread.md">多线程知识点</a>
