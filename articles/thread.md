@@ -213,9 +213,11 @@ CPU及JVM为了优化代码执行效率，会对代码进行重排序，其中�
   
   ```
 
----
+#### 8.JVM对 long和double是原子操作吗？
 
-#### 8.CAS
+我们基于Hotspot虚拟机，在32位系统下，每次能操作的最大长度是32bit，而long/double是8字节/64bit，所以对long/double的读写需要两条指令才能完，所以`对long/double的操作在32位hotspot中不是原子性操作`，而64位hotspot可以实现对long/double的原子性操作。
+
+#### 9.CAS
 
 判断数据是否被修改，同时写回新值，这两个操作要合成一个原子操作，这就是CAS(compare and swap)。
 
@@ -406,3 +408,92 @@ public final native boolean compareAndSwapInt(Object var1, long var2, int var4, 
   ```
 
   > 除了AtomicIntegerArray还包括AtomicLongArray和AtomicReferenceArray。
+
+- Striped64及相关子类
+
+  JDK8之后又提供了`Striped、LongAddr、DoubleAddr、LongAccumulator和DoubleAccumulator`用于实现对`long和double`的原子性操作。
+
+  LongAddr类，其原理是`将一个Long型拆分成多份，拆成一个base变量外加多个cell，每一个cell都包装了一个Long型变量，高并发下平摊到Cell上，最后取值再将base和cell累加求sum运算`。Cell就存在于LongAddr抽象父类Striped64中。
+
+  ```java
+  abstract class Striped64 extends Number {
+      // 一个base+多个cell
+  	@sun.misc.Contended static final class Cell {
+          // volatile修饰的long型变量
+          volatile long value;
+          Cell(long x) { value = x; }
+          final boolean cas(long cmp, long val) {
+              // CAS
+              return UNSAFE.compareAndSwapLong(this, valueOffset, cmp, val);
+          }
+  
+          // Unsafe mechanics
+          private static final sun.misc.Unsafe UNSAFE;
+          // Cell中value在内存中的偏移量
+          private static final long valueOffset;
+          static {
+              try {
+                  UNSAFE = sun.misc.Unsafe.getUnsafe();
+                  Class<?> ak = Cell.class;
+                  // 获取偏移量
+                  valueOffset = UNSAFE.objectFieldOffset
+                      (ak.getDeclaredField("value"));
+              } catch (Exception e) {
+                  throw new Error(e);
+              }
+          }
+      }
+  }
+  // LongAdder base 初始值是0 只能进行累加操作
+  public class LongAdder extends Striped64 implements Serializable {
+      // 求总值
+  	public long sum() {
+          Cell[] as = cells; Cell a;
+          long sum = base;
+          if (as != null) {
+              // 循环读取累加，非同步
+              for (int i = 0; i < as.length; ++i) {
+                  if ((a = as[i]) != null)
+                      sum += a.value;
+              }
+          }
+          return sum;
+      }
+  }
+  // LongAccumulator与LongAdder不同点在于构造函数，LongAccumulator可以自定义操作符和初始值
+  public class LongAccumulator extends Striped64 implements Serializable {
+  	public LongAccumulator(LongBinaryOperator accumulatorFunction,
+                             long identity) {
+          this.function = accumulatorFunction;
+          base = this.identity = identity;
+      }
+  }
+      
+  ```
+
+  > 相比于AtomicLong，LongAddr更适合于高并发的统计场景，而不是对某个Long型变量进行严格同步的场景。
+
+- 伪共享与缓存行填充
+
+  JDK8中通过`@sun.misc.Contented`注解实现缓存行填充的作用。
+
+  在CPU架构中，每个CPU都有自己的缓存。`缓存与主内存进行数据交换的基本单位叫Cache Line缓存行`。在64位的X86架构中，缓存行大小是64byte(8个long型)，意味着当缓存行失效，需要刷新到主内存的时候，最少需要刷新64字节。
+
+  ![](https://image.leejay.top/image/20200605/Q1vhuTbvuFNq.png?imageslim)
+
+  我们假设主内存中有x，y，z三个Long型变量，被Core1和Core2读到自己的缓存，放在同一个缓存行，当Core1对变量x进行修改，那么它需要`失效一整行Cache Line`，并通过CPU总线发消息通知Core2对应的Cache Line失效。`所以即使y和z没有被修改，因为和x处于同一个缓存行，所以x、y、z都需要失效，这就叫做伪共享问题`。
+
+  我们通过将x，y，z三个变量分布到不同的缓存行并且填充7个无用的Long型来填充缓存行，用于避免`伪共享问题`，JDK8之前都是通过下面的类似代码来实现，JDK8之后则是通过`@sun.misc.Contented`实现此功能。
+
+  ```java
+  class Test {
+      volatile long value;
+      long a ,b ,c ,d ,e ,f ,g;
+  }
+  
+  @sun.misc.Contended class demo{
+      volatile long value;
+  }
+  ```
+
+  

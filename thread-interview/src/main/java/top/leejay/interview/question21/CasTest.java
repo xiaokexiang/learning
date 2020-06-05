@@ -5,6 +5,7 @@ import sun.misc.Unsafe;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicStampedReference;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * @author xiaokexiang
@@ -26,5 +27,10 @@ public class CasTest {
     public static void main(String[] args) {
 
         AtomicStampedReference<Object> reference = new AtomicStampedReference<>(new Object(), 123);
+        LongAdder longAdder = new LongAdder();
+
+        @sun.misc.Contended class demo{
+            volatile long value;
+        }
     }
 }
