@@ -160,7 +160,39 @@ CPU及JVM为了优化代码执行效率，会对代码进行重排序，其中�
 
   Q：什么时候用volatile而可以不用synchronized？
 
-  A：如果`写入变量值不依赖变量当前值(count++就是依赖当前值)`，那么就可以用volatile。
+  A：如果`写入变量值不依赖变量当前值(count++就是依赖当前值，先去内存读取值，然后将当前值+1，将计算后的值赋给count。比如)`，那么就可以用volatile。
+
+  ```java
+  class Test {
+      // 这里的flag就可以不同锁同步
+      private static volatile boolean flag = true;
+      // 模拟AtomicInteger
+      private static CasUnsafe UNSAFE = new CasUnsafe(0);
+      
+      // 按照顺序打印1-100的奇偶数
+      public static void main(String[] args) {
+          THREAD_POOL.execute(() -> {
+              while (UNSAFE.getValue() < 100) {
+                  if (flag) {
+                      System.out.println(UNSAFE.incrementAndGet());
+                      flag = false;
+                  }
+              }
+          });
+          THREAD_POOL.execute(() -> {
+              while (UNSAFE.getValue() < 100) {
+                  if (!flag) {
+                      System.out.println(UNSAFE.incrementAndGet());
+                      flag = true;
+                  }
+              }
+          });
+          THREAD_POOL.shutdown();
+      }
+  }
+  ```
+
+  
 
 - DCL(Double Check Lock)
 
@@ -233,7 +265,7 @@ class AtomicInteger {
 		for(;;) {
             int current = get();
             int next = current + 1;
-            // 
+            // cas替换
             if (compareAndSwap(current, next)) {
             	return current;
             }
@@ -496,4 +528,350 @@ public final native boolean compareAndSwapInt(Object var1, long var2, int var4, 
   }
   ```
 
-  
+  ---
+
+### 10.Lock
+
+Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心在于`AbstractQueueSynchronizer`，又名`队列同步器(简称AQS)`。如果需要实现自定义锁，除了需要实现Lock接口外，还需要内部类继承Sync类。
+
+- AQS结构
+
+  ![](https://image.leejay.top/image/20200608/GVtL7ztzwtCl.png?imageslim)
+
+  - 记录当前锁的持有线程
+
+    由AQS的父类`AbstractOwnableSynchronizer`实现记录当前锁的持有线程功能。
+
+  - state变量
+
+    内部维护了volatile修饰的state变量，state = 0时表明没有线程获取锁，state = 1时表明有一个线程获取锁，当state > 1时，说明该线程重入了该锁。
+
+  - 线程阻塞和唤醒
+
+    由`LockSupport`类实现，其底层是调用了Unsafe的park 和 unpark。如果当前线程是非中断状态，调用park()阻塞，返回中断状态是false，如果当前线程是中断状态，调用park()会不起作用立即返回。也是为什么AQS要清空中断状态的原因。
+
+  - FIFO队列
+
+    AQS内部维护了一个基于`CLH(Craig, Landin, and Hagersten(CLH)locks。基于链表的公平的自旋锁)`变种的FIFO双向链表阻塞队列，在等待机制上由自旋改成阻塞唤醒(park/unpark)。
+
+    ![](https://image.leejay.top/image/20200609/CHJldTlsLVp2.png?imageslim)
+
+    > 还未初始化的时候，head = tail = null，之后初始化队列，往其中假如阻塞的线程时，会新建一个空的node，让head和tail都指向这个空node。之后加入被阻塞的线程对象。当head=tai时候说明队列为空。
+
+- 方法入口
+
+  我们选择`ReentrentLock`作为入口进行源码解读
+
+  ```java
+  class Test {
+      private static final ReentrantLock LOCK = new ReentrantLock();
+      
+      public void run() {
+          LOCK.lock();
+          try {
+              //dosomething
+          }finally {
+              LOCK.unlock();
+          }  
+      }
+  }
+  ```
+
+- 公平锁和非公平锁
+
+  ```java
+  // 非公平锁实现
+  static final class NonfairSync extends Sync {
+  	final void lock() {
+          // 先尝试CAS获取锁
+          if (compareAndSetState(0, 1))
+              setExclusiveOwnerThread(Thread.currentThread());
+          else
+              // 再排队
+              acquire(1);
+      }
+      ...
+  }
+  // 公平锁实现
+  static final class FairSync extends Sync {
+      private static final long serialVersionUID = -3000897897090466540L;
+  	// 去排队
+      final void lock() {
+          acquire(1);
+      }
+      ...
+  }
+  ```
+
+- acquire()
+
+  ```java
+  public final void acquire(int arg) {
+      if (!tryAcquire(arg) &&
+          acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+          selfInterrupt();
+  }
+  ```
+
+  - tryAcquire()
+
+    ```java
+    // 调用非公平锁的tryAcquire()
+    protected final boolean tryAcquire(int acquires) {
+        return nonfairTryAcquire(acquires);
+    }
+    // 返回false表明没有获取到锁，true表明成功获取锁/重入锁
+    final boolean nonfairTryAcquire(int acquires) {
+        // 获取当前线程
+        final Thread current = Thread.currentThread();
+        // 获取state状态
+        int c = getState();
+        // 如果state是0，表明当前没有线程获取锁
+        if (c == 0) {
+            // 尝试去获取锁，获取成功就设置独占线程为当前线程
+            if (compareAndSetState(0, acquires)) {
+                setExclusiveOwnerThread(current);
+                return true;
+            }
+        }
+        // 如果当前线程已经是独占线程，此时说明锁重入了
+        else if (current == getExclusiveOwnerThread()) {
+            // 修改state的值
+            int nextc = c + acquires;
+            if (nextc < 0)
+                throw new Error("Maximum lock count exceeded");
+            // 设置state值
+            setState(nextc);
+            return true;
+        }
+        return false;
+    }
+    ```
+
+    > Q:  为什么有的地方使用setState()，有的地方使用CAS？
+    >
+    > A:  因为使用setState()方法的前提是已经获取了锁，使用了CAS的是因为此时还没有获取锁。
+
+  - addWaiter()
+
+    ```java
+    // 获取不到锁，将当前线程构建成node对象加入队列
+    private Node addWaiter(Node mode) {
+        // 创建node对象(currentThread, Node.EXCLUSIVE)
+        Node node = new Node(Thread.currentThread(), mode);
+        Node pred = tail;
+        // 如果尾节点不等于null，说明队列不为空
+        if (pred != null) {
+            // 设置node的prev为尾节点
+            node.prev = pred;
+            // 尝试用CAS将node设置为tail尾节点
+            if (compareAndSetTail(pred, node)) {
+                // 设置成功，将node插入到队列尾部并且tail=node
+                pred.next = node;
+                return node;
+            }
+        }
+        // 尾节点为null 或 插入尾节点失败
+        enq(node);
+        return node;
+    }
+    // 循环执行插入操作，直到插入队尾成功
+    private Node enq(final Node node) {
+        for (;;) {
+            Node t = tail;
+            // 如果尾节点是null，说明队列还没有初始化
+            if (t == null) {
+                // 将head设置成空node，并且tail=head(说明此时队列初始化了但还没有节点)
+                if (compareAndSetHead(new Node()))
+                    tail = head;
+            } else {
+                // t!=null，设置node.prev=t
+                node.prev = t;
+                // CAS设置node到队尾，如果不成功继续循环设置直到成功
+                if (compareAndSetTail(t, node)) {
+                    // CAS成功，设置t的next属性
+                    t.next = node;
+                    // 跳出循环
+                    return t;
+                }
+            }
+        }
+    }
+    ```
+
+  - acquireQueued()
+
+    ```java
+    // 至此node已经插入队列成功，并返回
+    final boolean acquireQueued(final Node node, int arg) {
+        boolean failed = true;
+        try {
+            boolean interrupted = false;
+            for (;;) {
+                // 获取node的前继节点
+                final Node p = node.predecessor();
+                // 如果node的前继节点是头节点，则node尝试去获取锁
+                // tryAcquire(arg)会抛出异常
+                if (p == head && tryAcquire(arg)) {
+                    // 获取锁成功，设置头节点为node，并清空thread和prev属性
+                    setHead(node);
+                    // 方便回收前继节点p
+                    p.next = null;
+                    // 修改failed参数
+                    failed = false;
+                    // 跳出循环并返回
+                    return interrupted;
+                }
+                // 如果前继节点不是head节点 或 前继节点是head节点但获取不到锁
+                // 判断是否需要挂起
+                if (shouldParkAfterFailedAcquire(p, node) &&
+                    parkAndCheckInterrupt())
+                    interrupted = true;
+            }
+        } finally {
+            // 如果跳出循环，failed=false，不跳出循环也不会执行到这里
+            // 也就是只有tryAcquire(arg)发生异常了才会执行cancelAcquire()
+            if (failed)
+                cancelAcquire();
+        }
+    }
+    
+    final Node predecessor() throws NullPointerException {
+        // 获取node的prev节点p
+        Node p = prev;
+        // 如果p为null则抛出异常，这里的空指针一般不会生效，只是为了帮助虚拟机
+        if (p == null)
+            throw new NullPointerException();
+        else
+        // 否则返回前继节点p
+            return p;
+    }
+    // 将node节点设置为head头节点
+    private void setHead(Node node) {
+        head = node;
+        node.thread = null;
+        node.prev = null;
+    }
+    
+    // 判断获取锁失败之后是否需要park
+    private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
+        // 获取node前继节点的waitStatus，默认情况下值为0
+        int ws = pred.waitStatus;
+        // 如果是signal，说明前继节点已经准备就绪，等待被占用的资源释放
+        if (ws == Node.SIGNAL)
+            return true;
+        // 如果前继节点waitStatus>0，说明是Cancel
+        if (ws > 0) {
+            do {
+                // 获取前继节点的前继节点，直到它的状态>0(直到前继节点不是cancel节点)
+                node.prev = pred = pred.prev;
+            } while (pred.waitStatus > 0);
+            // 将不是cancel的节点与node相连
+            pred.next = node;
+        } else {
+            // 尝试将前继节点pred设置成signal状态，设置signal的作用是什么？
+            // 如果pred状态设置成功，第二次就会进入signal，返回true
+            compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
+        }
+        return false;
+    }
+    
+    // 将线程挂起并检查是否被中断
+    private final boolean parkAndCheckInterrupt() {
+        // 挂机当前线程，不会往下执行了
+        LockSupport.park(this);
+        // 往下执行的条件: unpark(t)或被中断
+        // 返回中断状态(并清空中断状态)
+        return Thread.interrupted();
+    }
+    ```
+
+    > LockSupport.park()除了`能够被unpark()唤醒，还会响应interrupt()打断`，但是Lock锁不能响应中断，如果是unpark，会返回false，如果是interrupt则返回true。
+
+  - cancelAcquire()
+
+    ```java
+    // 节点取消获取锁
+    private void cancelAcquire(Node node) {
+        // 忽略不存在的node
+        if (node == null)
+            return;
+    	// 清空node的thread属性
+        node.thread = null;
+    
+        // 获取node的不是cancel的前继节点
+        Node pred = node.prev;
+        while (pred.waitStatus > 0)
+            node.prev = pred = pred.prev;
+    
+        // 获取有效前继节点的后继节点
+        Node predNext = pred.next;
+    
+        // 设置node节点为cancel状态
+        node.waitStatus = Node.CANCELLED;
+    
+        // 如果node是tail尾节点，将pred(非cancel节点)设置为尾节点
+        if (node == tail && compareAndSetTail(node, pred)) {
+            // 设置尾节点pred的next指针为null
+            compareAndSetNext(pred, predNext, null);
+        } else {
+            int ws;
+            // 如果node不是tail尾节点
+            // 1.pred不是头节点
+            if (pred != head &&
+                // 2.如果不是则判断前继节点状态是否是signal
+                ((ws = pred.waitStatus) == Node.SIGNAL ||
+                 // 3.如果不是signal则尝试将pred前继节点设置为signal
+                 (ws <= 0 && compareAndSetWaitStatus(pred, ws, Node.SIGNAL))) &&
+                // 4.判断前继节点线程信息是否为null
+                pred.thread != null) {
+                // 1，2/3，4条件满足，获取node的后继节点
+                Node next = node.next;
+                // 如果后继节点不为null且waitStatus<=0
+                if (next != null && next.waitStatus <= 0)
+                    // 将node的前继节点的后继节点改成node的后继节点
+                    compareAndSetNext(pred, predNext, next);
+            } else {
+                // 如果node前继不是head & 也不是tail
+                unparkSuccessor(node);
+            }
+    		// 将node的后继节点设置为自身，方便回收
+            node.next = node;
+        }
+    }
+    
+    private void unparkSuccessor(Node node) {
+        int ws = node.waitStatus;
+        // 如果node。waitStatus < 0 ，将其设置为0
+        if (ws < 0)
+            compareAndSetWaitStatus(node, ws, 0);
+    	// 获取node的后继节点
+        Node s = node.next;
+        // 如果后继节点为null或是cancel，循环查找直到不符合该条件的node
+        if (s == null || s.waitStatus > 0) {
+            s = null;
+            // 重点：从队尾往前找！！！！
+            for (Node t = tail; t != null && t != node; t = t.prev)
+                if (t.waitStatus <= 0)
+                    s = t;
+        }
+        if (s != null)
+            LockSupport.unpark(s.thread);
+    }
+    ```
+
+    > Q：为什么当node的后继节点是null的时候，从队尾开始往前找？
+    >
+    > A：在enq()方法中，if (compareAndSetTail(t, node))  和   t.next = node 不是原子性的，那么就存在将node设置为tail，还没有设置 t.next = node之前，执行unparkSuccessor()查找逻辑，从前往后找，此时的t.next = null，他就错误的认为t是尾节点，实际此时尾节点已经是node了。而prev属性赋值是在CAS操作之前，此时的tail尾节点还没有改变，所以prev比next更可靠。也符合CLH队列的特性，**prev 引用是务必要保证可靠的**。
+
+  - selfInterrupt()
+
+    ```java
+    // 只有当
+    static void selfInterrupt() {
+        Thread.currentThread().interrupt();
+    }
+    ```
+
+    
+
