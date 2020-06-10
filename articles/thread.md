@@ -723,7 +723,7 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
                     return interrupted;
                 }
                 // 如果前继节点不是head节点 或 前继节点是head节点但获取不到锁
-                // 判断是否需要挂起
+                // 判断是否需要挂起,如果阻塞节点被唤醒，还会继续循环获取，直到获取锁才return
                 if (shouldParkAfterFailedAcquire(p, node) &&
                     parkAndCheckInterrupt())
                     interrupted = true;
@@ -842,7 +842,7 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
     
     private void unparkSuccessor(Node node) {
         int ws = node.waitStatus;
-        // 如果node。waitStatus < 0 ，将其设置为0
+        // 如果node.waitStatus < 0 ，将其设置为0(初始状态)
         if (ws < 0)
             compareAndSetWaitStatus(node, ws, 0);
     	// 获取node的后继节点
@@ -855,23 +855,60 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
                 if (t.waitStatus <= 0)
                     s = t;
         }
+        // 找到不为cancel的非null节点
         if (s != null)
+            // 唤醒对应的线程
             LockSupport.unpark(s.thread);
-    }
+  }
     ```
-
+  
     > Q：为什么当node的后继节点是null的时候，从队尾开始往前找？
-    >
-    > A：在enq()方法中，if (compareAndSetTail(t, node))  和   t.next = node 不是原子性的，那么就存在将node设置为tail，还没有设置 t.next = node之前，执行unparkSuccessor()查找逻辑，从前往后找，此时的t.next = null，他就错误的认为t是尾节点，实际此时尾节点已经是node了。而prev属性赋值是在CAS操作之前，此时的tail尾节点还没有改变，所以prev比next更可靠。也符合CLH队列的特性，**prev 引用是务必要保证可靠的**。
+  >
+    > A：在enq()方法中，if (compareAndSetTail(t, node))  和   t.next = node 不是原子性的，那么就存在将node设置为tail，还没有设置 t.next = node之前，另一个线程正好执行unparkSuccessor()的查找逻辑，从前往后找，此时的t.next = null，他就错误的认为t是尾节点，实际此时尾节点已经是node了。而prev属性赋值是在CAS操作之前，此时的tail尾节点还没有改变，所以prev比next更可靠。也符合CLH队列的特性：**prev 引用是务必要保证可靠的**。
 
   - selfInterrupt()
-
+  
     ```java
-    // 只有当
+    // 当获取锁或插入node到队列的过程中发生了interrupt，那么这里需要补上
     static void selfInterrupt() {
         Thread.currentThread().interrupt();
-    }
+  }
     ```
+  
+- unlock()
 
-    
+  ```java
+  public final boolean release(int arg) {
+      // 尝试释放锁
+      if (tryRelease(arg)) {
+          Node h = head;
+          // 如果头节点不为null且不是初始状态
+          if (h != null && h.waitStatus != 0)
+              // 唤醒头节点的后继节点
+              unparkSuccessor(h);
+          // 唤醒的线程会重新从parkAndCheckInterrupt()方法中被unpark
+          return true;
+      }
+      return false;
+  }
+  
+  protected final boolean tryRelease(int releases) {
+      // 此时处于已获取锁状态，所以不需要cas获取state
+      int c = getState() - releases;
+      // 如果当前线程不是独占线程抛异常
+      if (Thread.currentThread() != getExclusiveOwnerThread())
+          throw new IllegalMonitorStateException();
+      boolean free = false;
+      // 如果state=0说明此时无锁
+      if (c == 0) {
+          free = true;
+          setExclusiveOwnerThread(null);
+      }
+      // 设置状态
+      setState(c);
+      return free;
+  }
+  ```
+
+  
 
