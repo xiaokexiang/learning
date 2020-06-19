@@ -27,14 +27,22 @@ public class PowerAdapterStrategy {
         String CHINA = "China";
         String JAPAN = "Japan";
     }
-}
 
-class PowerAdapterTest {
     public static void main(String[] args) {
-        PowerAdapter powerAdapter = PowerAdapterStrategy.getPowerAdapter(PowerAdapterStrategy.AdapterName.CHINA);
+        PowerAdapter chinaPowerAdapter = PowerAdapterStrategy.getPowerAdapter(PowerAdapterStrategy.AdapterName.CHINA);
         ChinaAc chinaAc = new ChinaAc();
-        if (powerAdapter.support(chinaAc)) {
-            powerAdapter.outPutDc(chinaAc);
+        JapanAc japanAc = new JapanAc();
+
+        if (chinaPowerAdapter.support(chinaAc)) {
+            chinaPowerAdapter.outPutDc(chinaAc);
+        }
+        System.out.println("-------------------------------------------------------");
+
+        for (Map.Entry<String, PowerAdapter> entry : POWER_ADAPTER.entrySet()) {
+            PowerAdapter powerAdapter = entry.getValue();
+            if (powerAdapter.support(japanAc)) {
+                powerAdapter.outPutDc(japanAc);
+            }
         }
     }
 }

@@ -15,7 +15,7 @@ import java.util.List;
  * @date 11/7/2019
  * 优化版委派模式 结合 策略模式
  */
-public class DispatcherServlet extends HttpServlet {
+public class DispatcherServletDelegate extends HttpServlet {
     private static List<Handler> handlerMapping = Lists.newArrayList();
 
     @Override
