@@ -4,7 +4,7 @@
 
 ---
 
-#### 1. 守护线程与非守护线程
+### 1. 守护线程与非守护线程
 
 运行在JVM进程中的线程非为两类： 守护线程 & 非守护线程，我们通过如下代码将线程设置为非守护线程。
 
@@ -19,7 +19,7 @@ void daemon() {
 
 ---
 
-#### 2. 线程的中断
+### 2. 线程的中断
 
 在Java多线程中，我们一般用`t.interrupt()`来实现对线程的中断，即使你调用了中断函数，线程也不一定会响应中断`(因为此时不一定拥有CPU执行权)`，该方法的本质就是修改了`中断标志位`。
 
@@ -58,25 +58,112 @@ void interrupt() {
 
 ---
 
-#### 3. 为什么wait() & notify()属于Object类？
+### 3. 为什么wait() & notify()属于Object类？
 
 因为wait() 和 notify()拥有锁才可以执行，其次synchronized中的锁可以是任意对象(通过对象头中的MarkWord实现)，所以他们属于Object类。
 
 ---
 
-#### 4. 线程状态迁移图
+### 4.什么时候使用notify(signal)和notifyAll(signalAll)
+
+只有当`所有线程拥有相同的等待条件，所有线程被唤醒后执行相同的操作，最重要的是只需要唤醒一个线程`，notify最典型的应用是在`线程池`。除此之外建议使用notifyAll和signalAll(condition)。因为`使用notifyAll不会遗落等待队列中的线程，但是notifyAll会带来毕竟强的竞争。`
+
+```java
+private static final Object Lock = new Object();
+
+@SneakyThrows
+@Test
+void notifyOrNotifyAll() {
+    // 将线程A加入Lock的等待队列
+    Thread threadA = new Thread(() -> {
+        synchronized (Lock) {
+            try {
+                System.out.println("thread a prepare to wait");
+                Lock.wait();
+                System.out.println("thread a is awakened");
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+    });
+    // 将线程B加入Lock的等待队列
+    Thread threadB = new Thread(() -> {
+        synchronized (Lock) {
+            try {
+                System.out.println("thread b prepare to wait");
+                Lock.wait();
+                System.out.println("thread b is awakened");
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+    });
+    // 线程C唤醒等待队列中等待线程
+    Thread threadC = new Thread(() -> {
+        synchronized (Lock) {
+            System.out.println("thread c prepare to notify");
+            // 只会唤醒一个线程，另一个人不会被唤醒
+            Lock.notify();
+            // A和B都会被唤醒,但是顺序不一定
+            // Lock.notifyAll();
+        }
+    });
+
+    threadA.start();
+    threadB.start();
+    Thread.sleep(1000);
+    threadC.start();
+    // 保证A和B已经在等待队列中再唤醒
+    threadA.join();
+    threadB.join();
+    threadC.join();
+    System.out.println("main thread is end");
+}
+```
+
+---
+
+### 5. MESA模型
+
+在解释MESA模型之前，我们需要了解什么是`管程：又称为监视器，它是描述并实现对共享变量的管理与操作，使其在多线程下能正确执行的一个管理策略。可以理解成临界区资源的管理策略。`MESA模型是管程的一种实现策略，Java使用的就是该策略。
+
+#### 相关术语
+
+1. **enterQueue**：`管程的入口队列`，当线程在申请进入管程中发现管程已被占用，那么就会进入该队列并阻塞。
+2. **varQueue**：`条件变量等待队列`，在线程执行过程中(已进入管程)，条件变量不符合要求，线程被阻塞时会进入该队列。
+3. **condition variables**：条件变量，存在于管程中，一般由程序赋予意义，程序通过判断条件变量执行阻塞或唤醒操作。
+4. **阻塞和唤醒**：wait()和await()就是阻塞操作。notify()和notifyAll()就是唤醒操作。
+
+#### 模型概念图
+
+![](https://image.leejay.top/image/20200623/7fsvqebTy60R.png?imageslim)
+
+	> Synchronized和Lock在MSEA监视器模型中的区别在于`前者只有一个条件变量，后者可以有多个`。
+
+#### 执行流程
+
+1. 多个线程进入`入口等待队列enterQueue`，JVM会保证只有一个线程能进入管程内部，Syn中进入管程的线程随机。
+2. 进入管程后通过条件变量判断当前线程是否能执行操作，如果不能跳到step3，否则跳到step4。
+3. 条件变量调用`阻塞`方法，将当前线程放入varQueue，等待其他线程唤醒，跳回step1。
+4. 执行相应操作，执行完毕后调用notify/notifyAll等唤醒操作，唤醒对应varQueue中的一个或多个等待线程。
+5. 被唤醒的线程会从varQueue放入enterQueue中，再次执行step1。
+6. `被唤醒的线程不会立即执行，会被放入enterQueue，等待JVM下一次选择运行，而正在运行的线程会继续执行，直到程序执行完毕。`
+
+---
+
+### 5. 线程状态迁移图
 
 ![](https://image.leejay.top/image/20200326/3XSAP42BEbCV.png)
 
 ---
 
-#### 5. Synchronized在对象头中的构成
+### 6. Synchronized在对象头中的构成
 
 ![](https://image.leejay.top/image/20200603/sVQHgMaLfpgG.png?imageslim)
 
 ---
 
-#### 6. 内存可见性问题
+### 7.内存可见性问题
 
 CPU及JVM为了优化代码执行效率，会对代码进行重排序，其中包括：
 
@@ -128,7 +215,7 @@ CPU及JVM为了优化代码执行效率，会对代码进行重排序，其中�
 
 ---
 
-#### 7. volatile
+### 8. volatile
 
 - 作用
 
@@ -245,11 +332,11 @@ CPU及JVM为了优化代码执行效率，会对代码进行重排序，其中�
   
   ```
 
-#### 8.JVM对 long和double是原子操作吗？
+### 9.JVM对 long和double是原子操作吗？
 
 我们基于Hotspot虚拟机，在32位系统下，每次能操作的最大长度是32bit，而long/double是8字节/64bit，所以对long/double的读写需要两条指令才能完，所以`对long/double的操作在32位hotspot中不是原子性操作`，而64位hotspot可以实现对long/double的原子性操作。
 
-#### 9.CAS
+### 10.CAS
 
 判断数据是否被修改，同时写回新值，这两个操作要合成一个原子操作，这就是CAS(compare and swap)。
 
@@ -530,7 +617,7 @@ public final native boolean compareAndSwapInt(Object var1, long var2, int var4, 
 
   ---
 
-### 10.Lock
+### 11.Lock
 
 Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心在于`AbstractQueueSynchronizer`，又名`队列同步器(简称AQS)`。如果需要实现自定义锁，除了需要实现Lock接口外，还需要内部类继承Sync类。
 
@@ -602,6 +689,10 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
       ...
   }
   ```
+
+  > 公平锁和非公平锁如何选择？
+  >
+  > 非公平锁一进来就尝试去获取锁，有效的减少了线程的上下文切换，所以为了追求`高吞吐量`建议选择非公平锁，但是会导致某些线程长时间在排队，没有机会获取锁。否则建议选择公平锁。
 
 - acquire()
 
@@ -863,10 +954,9 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
     ```
   
     > Q：为什么当node的后继节点是null的时候，从队尾开始往前找？
-  >
+    >
     > A：在enq()方法中，if (compareAndSetTail(t, node))  和   t.next = node 不是原子性的，那么就存在将node设置为tail，还没有设置 t.next = node之前，另一个线程正好执行unparkSuccessor()的查找逻辑，从前往后找，此时的t.next = null，他就错误的认为t是尾节点，实际此时尾节点已经是node了。而prev属性赋值是在CAS操作之前，此时的tail尾节点还没有改变，所以prev比next更可靠。也符合CLH队列的特性：**prev 引用是务必要保证可靠的**。
-
-  - selfInterrupt()
+- selfInterrupt()
   
     ```java
     // 当获取锁或插入node到队列的过程中发生了interrupt，那么这里需要补上
@@ -910,5 +1000,16 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
   }
   ```
 
-  
+- Condition
 
+  ```java
+  final ConditionObject newCondition() {
+      return new ConditionObject();
+  }
+  ```
+
+  > Q：condition的await()、signal()、signalAll()作用和wait()、notify()、notifyAll()区别？
+  >
+  > A：condition的await()、signal()、signalAll()作用和wait()、notify()、notifyAll()类似，但是两者存在区别。首先是基于不同的锁：Lock和Synchronized，其次condition可以存在不同的条件队列，每个条件队列之间互不影响，而syn只会有一个条件队列(或条件变量，根据syn修饰位置不同，分别为this、class类和代码块中内容)。
+
+  ![图片来源微信公众号: 日拱一兵](https://image.leejay.top/image/20200623/YuqTOjdHO8eR.png?imageslim)
