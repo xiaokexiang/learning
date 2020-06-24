@@ -4,10 +4,10 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class ThreadIntervewApplication {
+public class ThreadInterviewApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(ThreadIntervewApplication.class, args);
+        SpringApplication.run(ThreadInterviewApplication.class, args);
     }
 
 }
