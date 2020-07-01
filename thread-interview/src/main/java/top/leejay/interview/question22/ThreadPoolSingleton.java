@@ -22,8 +22,8 @@ public class ThreadPoolSingleton {
                 32,
                 60,
                 TimeUnit.SECONDS,
-                new ArrayBlockingQueue<>(20),
+                new ArrayBlockingQueue<>(200),
                 new CustomizableThreadFactory("Thread-Pool-"),
-                new ThreadPoolExecutor.AbortPolicy());
+                new ThreadPoolExecutor.CallerRunsPolicy());
     }
 }
