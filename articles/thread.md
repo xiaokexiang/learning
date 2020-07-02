@@ -138,7 +138,7 @@ void notifyOrNotifyAll() {
 
 ![](https://image.leejay.top/image/20200623/7fsvqebTy60R.png?imageslim)
 
-	> Synchronized和Lock在MSEA监视器模型中的区别在于`前者只有一个条件变量，后者可以有多个`。
+>  Synchronized和Lock在MSEA监视器模型中的区别在于`前者只有一个条件变量，后者可以有多个`。
 
 #### 执行流程
 
@@ -753,7 +753,7 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
   >
   > 非公平锁一进来就尝试去获取锁，有效的减少了线程的上下文切换，所以为了追求`高吞吐量`建议选择非公平锁，但是会导致某些线程长时间在排队，没有机会获取锁。否则建议选择公平锁。
 
-- acquire()
+- acquire
 
   ```java
   // 如果第一次获取锁失败，说明此时有其他线程持有锁，所以执行acquire
@@ -764,45 +764,120 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
   }
   ```
 
-- tryAcquire()
+- tryAcquire
 
   ```java
   // 调用非公平锁的tryAcquire，再一次尝试去获取锁
-      protected final boolean tryAcquire(int acquires) {
-          return nonfairTryAcquire(acquires);
-      }
-      // 返回false表明没有获取到锁，true表明成功获取锁/重入锁
-      final boolean nonfairTryAcquire(int acquires) {
-          // 获取当前线程
-          final Thread current = Thread.currentThread();
-          // 获取state状态
-          int c = getState();
-          // 如果state是0，表明当前没有线程获取锁
-          if (c == 0) {
-              // 尝试去获取锁，获取成功就设置独占线程为当前线程
-              if (compareAndSetState(0, acquires)) {
-                  setExclusiveOwnerThread(current);
-                  return true;
-              }
-          }
-          // 如果当前线程已经是独占线程，此时说明锁重入了
-          else if (current == getExclusiveOwnerThread()) {
-              // 修改state的值
-              int nextc = c + acquires;
-              if (nextc < 0)
-                  throw new Error("Maximum lock count exceeded");
-              // 设置state值，因为此时的获取锁的线程就是当前线程
-              setState(nextc);
+  protected final boolean tryAcquire(int acquires) {
+      return nonfairTryAcquire(acquires);
+  }
+  // 返回false表明没有获取到锁，true表明成功获取锁/重入锁
+  final boolean nonfairTryAcquire(int acquires) {
+      // 获取当前线程
+      final Thread current = Thread.currentThread();
+      // 获取state状态
+      int c = getState();
+      // 如果state是0，表明当前没有线程获取锁
+      if (c == 0) {
+          // 尝试去获取锁，获取成功就设置独占线程为当前线程
+          if (compareAndSetState(0, acquires)) {
+              setExclusiveOwnerThread(current);
               return true;
           }
-          return false;
       }
+      // 如果当前线程已经是独占线程，此时说明锁重入了
+      else if (current == getExclusiveOwnerThread()) {
+          // 修改state的值
+          int nextc = c + acquires;
+          if (nextc < 0)
+              throw new Error("Maximum lock count exceeded");
+          // 设置state值，因为此时的获取锁的线程就是当前线程
+          setState(nextc);
+          return true;
+      }
+      return false;
+  }
+  
   ```
 
+// 公平锁的tryAcquire实现
+  protected final boolean tryAcquire(int acquires) {
+      ...
+      if (c == 0) {
+          // hasQueuedPredecessors是公平锁的主要体现
+          if (!hasQueuedPredecessors() &&
+              compareAndSetState(0, acquires)) {
+              setExclusiveOwnerThread(current);
+              return true;
+          }
+      }
+      ...
+  }
+
+  ```
+  
   > Q:  为什么有的地方使用setState()，有的地方使用CAS？
   >
   > A:  因为使用setState()方法的前提是已经获取了锁，使用了CAS的是因为此时还没有获取锁。
-- addWaiter()
+  
+- hasQueuedPredecessors
+
+  ```java
+  // true/false 有节点在等待/无节点等待
+  public final boolean hasQueuedPredecessors() {
+      // 这里为什么tail获取在head之前？
+      // 假设第一个节点入队，根据enq()设置head和tail可知
+      // 如果此处tail = null，head = null | head != null都有可能
+      // 如果此处tail != null ，那么(head = tail) != null
+      Node t = tail;
+      Node h = head;
+      Node s;
+      return h != t &&
+          // (s = h.next) == null 成立说明有其他线程正在初始化队列
+          ((s = h.next) == null || s.thread != Thread.currentThread());
+  }
+  ```
+
+  > 返回情况分析：
+  >
+  > 1. 若`h == t`说明此时队列还没有初始化或只有哨兵节点，返回false表明无等待节点。
+  >
+  > 2. 若`h != t`成立，说明此时队列有节点啊，那`((s = h.next) == null)`应该也成立啊？
+  >    其实不然，我们假设线程A获取锁失败，尝试加入队列，此时队列还未初始化，A执行到enq方法：
+  >
+  >    ```java
+  >    private Node enq(final Node node) {
+  >        for (;;) {
+  >            Node t = tail;
+  >            if (t == null) {
+  >                // 线程A准备初始化队列，它setHead(new Node())成功了
+  >                // 此时线程切换，线程B执行了hasQueuedPredecessors()
+  >                // 此时 head != null; tail = null; head.next = null
+  >                // 此时h != t 且 (s = h.next) = null
+  >                if (compareAndSetHead(new Node()))
+  >                    tail = head;
+  >            } else {
+  >                node.prev = t;
+  >                if (compareAndSetTail(t, node)) {
+  >                    t.next = node;
+  >                    return t;
+  >                }
+  >            }
+  >        }
+  >    }
+  >    ```
+  >
+  >    
+  >
+  > 3. 若`((s = h.next) == null)`成立，说明此时存在另一个线程执行到`compareAndSetHead(new Node())`和`tail = head`的中间状态。所以也需要返回true，表明有节点在等待。
+  >
+  > 4. 若`((s = h.next) == null)`不成立，我们继续判断队列中第一个等待线程（`s.thread != Thread.currentThread()`）是否是当前线程，是就返回true，否则返回false。
+  >
+  > 5.  方法中为什么`Node t = tail`获取在`Node h = head`之前？
+  >    根据上面的分析，我们知道第一个节点入队的时候会出现`head != null 但 tail = null`的情况，因为是`先设置head再设置tail`，操作非原子性。
+  >    我们假设`队列未初始化`，hasQueuedPredecessors方法中`tail和head代码位置互换`，线程A先执行`Node h = head;`此时`head = null`，线程切换，线程B执行enq方法初始化队列导致`（head = tail）!= null`，又切回线程A，执行`Node t = tail`，`tail != null`，判断代码`h != t`成立，继续判断`(s = h.next) == null`出问题了，`h =null,h.next会抛空指针!!!`，这就是问题所在。(再次膜拜Doug lea！！！)
+
+- addWaiter
 
   ```java
   // 获取不到锁，将当前线程构建成node对象加入队列
@@ -850,7 +925,7 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
   }
   ```
 
-- acquireQueued()
+- acquireQueued
 
   ```java
   // 至此node已经插入队列成功，并返回
@@ -940,7 +1015,7 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
 
   > LockSupport.park()除了`能够被unpark()唤醒，还会响应interrupt()打断`，但是Lock锁不能响应中断，如果是unpark，会返回false，如果是interrupt则返回true。
 
-- cancelAcquire()
+- cancelAcquire
 
   ```java
   // 节点取消获取锁
@@ -1024,11 +1099,11 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
     >
     > `			③ tail.next = node; }` 
     >
-    > `②和`③两行代码不是原子性的，所以就存在：线程A将nodeA成功设置为tail尾节点，如果此时线程切换，线程B执行unparkSuccessor方法唤醒尾节点，如果从前往后查询，会发现`tail.next = null`，会认为tail是尾节点，其实此时的尾节点已经被线程A改成了nodeA，doug lea在AQS的文档中也说明了`prev是务必要保证的可靠引用，而next只是一种优化。`
+    > ②和③两行代码不是原子性的，所以就存在：线程A将nodeA成功设置为tail尾节点，如果此时线程切换，线程B执行unparkSuccessor方法唤醒尾节点，如果从前往后查询，会发现`tail.next = null`，会认为tail是尾节点，其实此时的尾节点已经被线程A改成了nodeA，doug lea在AQS的文档中也说明了`prev是务必要保证的可靠引用，而next只是一种优化。`
     >
     > 又比如cancelAcquire方法中，都是断开了next指针，prev指针没有断开，也是上诉理论的一种体现。
 
-- selfInterrupt()
+- selfInterrupt
   
     ```java
     // 当获取锁或插入node到队列的过程中发生了interrupt，那么这里需要补上打断
@@ -1041,7 +1116,7 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
 
   ![](https://image.leejay.top/image/20200628/9RLQ683DruWq.png?imageslim)
   
-- unlock()
+- unlock
 
   ```java
   public final boolean release(int arg) {
@@ -1502,7 +1577,7 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
             Node h = head;
             // h != null ，只要队列初始化过，就一直成立
             // h != tail 如果队列中添加过节点，就一直成立
-            // 这两个条件保证了队列至少有两个node
+            // 这两个条件保证了队列至少有两个node，其中一个哨兵节点
             if (h != null && h != tail) {
                 int ws = h.waitStatus;
                 // 如果head是SIGNAL，就执行unparkSuccessor()
@@ -1556,107 +1631,385 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
     }
     ```
 
-    > `doReleaseShared`方法在此不再赘述，它保证了`多线程情况下的后继节点能够正常被唤醒`。
+    > 1. `doReleaseShared`方法在此不再赘述，它保证了`多线程情况下的后继节点能够正常被唤醒`。
     >
-    > `tryReleaseShared`目的就是为了恢复`共享变量state`。便于后面的新线程获取锁。
+    > 2. `tryReleaseShared`目的就是为了恢复`共享变量state`。便于后面的新线程获取锁。
     >
-    > Sempahore释放锁的时候，`不校验你是否持有共享锁的，所以可以理解成任意线程都可以释放锁。`那么就会出现你的`permit设置为2，当时你调用了三次release，你的state为3的情况。`即使调用多次release方法也不会产生影响，因为在`unparkSuccessor`方法中，会去获取next节点，如果没有就`从后往前查找有效节点`再唤醒，所以对于多余的release，是不会有影响的。
-
-  - 共享锁总结
-
+    > 3. Sempahore释放锁的时候，`不校验你是否持有共享锁的，所以可以理解成任意线程都可以释放锁。`那么就会出现你的`permit设置为2，当你调用了三次release，你的state为3的情况。`
+  >    即使调用多次release方法也不会产生影响，因为在`unparkSuccessor`方法中，会去获取next节点，如果没有就`从后往前查找有效节点`再唤醒，没有有效节点就不会唤醒。
+  
+- 共享锁总结
+  
     - 共享锁相比独占锁最大的不同在于`setHeadAndPropagate` 和 `doReleaseShared`。
     - `setHeadAndPropagate` 用于设置新head，及一定条件下调用`doReleaseShared`，且调用`doReleaseShared`会导致线程不必要的唤醒。
     - `doReleaseShared`在获取锁和释放锁的时候都可能被调用，因为是共享锁，即便你获取了锁，后继节点也有可能获取锁。
     - `PROPAGATE`与`SIGNAL`的意义相同，都为了让唤醒线程能检测到状态变化，区别在于前者`只作用于共享锁`。
-    - 共享锁操作共享变量肯定会出现数据不一致的情况(`permit = 1除外,此时是特殊的独占锁`)。
+    - 共享锁操作共享变量肯定会出现`原子性和有序性`的情况(`permit = 1除外,此时是特殊的独占锁`)。
 
-- ReadWriteLock读写锁
+---
 
-  ReadWriteLock是接口，它定义了两个方法：`ReadLock`和`WriteLock`，读写锁的具体实现在`ReentrantReadWriteLock`中。读写锁是之前分析的`独占锁`和`共享锁`两个特性的集合体，具有如下规定：
+### 12. ReadWriteLock读写锁
 
-  1. 允许多个线程同时读取变量。
-  2. 某时刻只允许一个线程写变量。
-  3. 如果有写线程正在执行写操作，那么禁止其他读线程读取变量。
+ReadWriteLock是接口，它定义了两个方法：`ReadLock`和`WriteLock`，读写锁的具体实现在`ReentrantReadWriteLock`中。读写锁是之前分析的`独占锁`和`共享锁`两个特性的集合体，具有如下规定：
 
-  ReadWriteLock的默认实现类`ReentrantReadWriteLock`
+1. 允许多个线程同时读取变量。
+2. 某时刻只允许一个线程写变量。
+3. 如果有写线程正在执行写操作，那么禁止其他读线程读取变量。
+
+ReadWriteLock的默认实现类`ReentrantReadWriteLock`
+
+```java
+public class ReentrantReadWriteLock  implements ReadWriteLock {
+	// 读锁和写锁都是ReentrantReadWriteLock的内部类
+    private final ReentrantReadWriteLock.ReadLock readerLock;
+    private final ReentrantReadWriteLock.WriteLock writerLock;
+
+    final Sync sync;
+    // 读写锁默认是非公平锁
+    public ReentrantReadWriteLock() {
+        this(false);
+    }
+    
+    // ReadLock和WriteLock都是继承了同一个抽象类Lock，所以他们属于同一个AQS队列
+    public ReentrantReadWriteLock(boolean fair) {
+        sync = fair ? new FairSync() : new NonfairSync();
+        readerLock = new ReadLock(this);
+        writerLock = new WriteLock(this);
+    }
+}
+```
+
+> 相比于`Semaphore`，`ReentrantReadWriteLock`采用共享和独占结合的方法。Semaphore就像是一个令牌桶，谁都可以拿取令牌执行任务，谁都可以归还令牌。它不会记录是哪个线程获取了锁，而`ReentrantReadWriteLock`会记录，只有持有相关锁才能来释放锁。
+
+- state
+
+  与独占锁、共享锁的state的使用不同，因为需要表示两种状态，所以对`int型state`做了`高低位切割`，分别表示不同的状态。已知`int=4byte= 32bit`，所以`高16位表示读，低16位表示写`。他们的取值范围在`[0 ~ 2^16 - 1]`，进而我们可以得出，最多有`2^16 -1`个线程可以获取读锁。
+
+  ![](https://image.leejay.top/image/20200630/iU956J9I2D6U.png?imageslim)
 
   ```java
-  public class ReentrantReadWriteLock  implements ReadWriteLock {
-  	// 读锁和写锁都是ReentrantReadWriteLock的内部类
-      private final ReentrantReadWriteLock.ReadLock readerLock;
-      private final ReentrantReadWriteLock.WriteLock writerLock;
+  abstract static class Sync extends AbstractQueuedSynchronizer {
+        
+      static final int SHARED_SHIFT   = 16;
+      static final int SHARED_UNIT    = (1 << SHARED_SHIFT);
+      // 读锁和写锁的count不能超过MAX_COUNT
+      static final int MAX_COUNT      = (1 << SHARED_SHIFT) - 1;
+      static final int EXCLUSIVE_MASK = (1 << SHARED_SHIFT) - 1;
   
-      final Sync sync;
-      // 读写锁默认是非公平锁
-      public ReentrantReadWriteLock() {
-          this(false);
+      // 返回读锁的count
+      static int sharedCount(int c) { 
+          return c >>> SHARED_SHIFT; 
       }
-      
-      // ReadLock和WriteLock都是继承了同一个抽象类Lock，所以他们属于同一个AQS队列
-      public ReentrantReadWriteLock(boolean fair) {
-          sync = fair ? new FairSync() : new NonfairSync();
-          readerLock = new ReadLock(this);
-          writerLock = new WriteLock(this);
+      // 返回写锁的count
+      static int exclusiveCount(int c) { 
+          return c & EXCLUSIVE_MASK; 
       }
   }
   ```
 
-  > 相比于`Semaphore`，`ReentrantReadWriteLock`采用共享和独占结合的方法。Semaphore就像是一个令牌桶，谁都可以拿取令牌执行任务，谁都可以归还令牌。它不会记录是哪个线程获取了锁，而`ReentrantReadWriteLock`会记录，只有持有相关锁才能来释放锁。
+  > 1. 读锁和写锁的count不能超过`MAX_COUNT即2^16-1`。
+  >
+  > 2. int 型 state 无符号右移16位，得到的即为高16位的count。
+  >
+  > 3. int 型 state 与 `1111 1111 1111 1111`做`与运算`，它的结果也不会超过`1111 1111 1111 1111`，因为`与运算`的规则是`都1为1，否则为0`。
+  >
+  >    ```java
+  >    如int state = 3，那么它的二进制如下
+  >        
+  >      0000 0000 0000 0000 0000 0000 0000 0011
+  >    &                     1111 1111 1111 1111
+  >    ——————————————————————————————————————————    
+  >                          0000 0000 0000 0011
+  >    ```
+  >
+  > 4. 如果读count + 1，那么就等于 `c  =  c + 1 << 16`，如果count + 1，那么`c = c + 1`。
+  >
+  > 5. `如果c 不为 0，当写count = 0时，读count > 0成立`。即读锁已经获取。
 
-  - state
+- ThreadLocalHoldCounter
 
-    与独占锁、共享锁的state的使用不同，因为需要表示两种状态，所以对`int型state`做了`高低位切割`，分别表示不同的状态。已知`int=4byte= 32bit`，所以`高16位表示读，低16位表示写`。他们的取值范围在`[0 ~ 2^16 - 1]`，进而我们可以得出，最多有`2^16 -1`个线程可以获取读锁。
+  除了需要记录锁被拿取的总次数，还需要记录每个线程分别拿走多少，所以我们使用[ThreadLocal](#7. ThreadLocal内存泄漏问题)，将记录的工作交给线程自己。
 
-    ![](https://image.leejay.top/image/20200630/iU956J9I2D6U.png?imageslim)
+  ```java
+  abstract static class Sync extends AbstractQueuedSynchronizer {
+      // 当前线程持有的读锁数量，当为0的时候置为null
+      private transient ThreadLocalHoldCounter readHolds;
+      
+      // 下面三个成员变量的作用就是为了快速获取当前线程的HoldCounter对象
+      private transient HoldCounter cachedHoldCounter;
+      // 用于读锁，表明第一个获取读锁的线程是谁
+      private transient Thread firstReader = null;
+      // 用于读锁，表明第一个获取读锁的线程重入了几次
+      private transient int firstReaderHoldCount;
+  	Sync() {
+          readHolds = new ThreadLocalHoldCounter();
+          setState(getState()); // ensures visibility of readHolds
+      }
+      // 每个线程都拥有HoldCounter类的实例，互不干预
+      static final class HoldCounter {
+          int count = 0;
+          // 这里线程id直接使用id，不使用reference，便于GC
+          final long tid = getThreadId(Thread.currentThread());
+      }
+  
+      static final class ThreadLocalHoldCounter
+          extends ThreadLocal<HoldCounter> {
+          public HoldCounter initialValue() {
+              return new HoldCounter();
+          }
+      }
+  }
+  ```
+
+- WriteLock
+
+  我们从写锁开始入手，写锁就是独占锁的体现。
+
+  - tryLock
 
     ```java
-    abstract static class Sync extends AbstractQueuedSynchronizer {
-          
-        static final int SHARED_SHIFT   = 16;
-        static final int SHARED_UNIT    = (1 << SHARED_SHIFT);
-        // 读锁和写锁的count不能超过MAX_COUNT
-        static final int MAX_COUNT      = (1 << SHARED_SHIFT) - 1;
-        static final int EXCLUSIVE_MASK = (1 << SHARED_SHIFT) - 1;
+    // 写锁入口
+    public void lock() {
+        sync.acquire(1);
+    }
     
-        // 返回读锁的count
-        static int sharedCount(int c) { 
-            return c >>> SHARED_SHIFT; 
+    public final void acquire(int arg) {
+        if (!tryAcquire(arg) &&
+            acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+            selfInterrupt();
+    }
+    // 与独占锁不同的子类实现
+    protected final boolean tryAcquire(int acquires) {
+        // 获取当前线程
+        Thread current = Thread.currentThread();
+        int c = getState();
+        // 获取写锁的count
+        int w = exclusiveCount(c);
+        // c!=0说明有锁，但不知道是什么锁
+        if (c != 0) {
+            // state != 0 且 w = 0说明此时存在读锁
+            // 如果当前线程不是持有锁的线程
+            // 两个条件一个成立就获取写锁失败
+            if (w == 0 || current != getExclusiveOwnerThread())
+                return false;
+            // 判断写锁count是否超过最大count
+            if (w + exclusiveCount(acquires) > MAX_COUNT)
+                throw new Error("Maximum lock count exceeded");
+            // 到此处说明是当前线程，所以无竞争，直接set改变写锁count
+            setState(c + acquires);
+            return true;
         }
-        // 返回写锁的count
-        static int exclusiveCount(int c) { 
-            return c & EXCLUSIVE_MASK; 
+        // c=0说明说明无锁
+        // 如果不需要阻塞就尝试CAS修改state
+        if (writerShouldBlock() ||
+            !compareAndSetState(c, c + acquires))
+            return false;
+        // 设置当前线程为独占线程
+        setExclusiveOwnerThread(current);
+        return true;
+    }
+    // 非公平锁实现
+    static final class NonfairSync extends Sync {
+        // 非公平直接返回false尝试去获取锁
+        final boolean writerShouldBlock() {
+            return false;
+        }
+    }
+    
+    // 公平锁实习那
+    static final class FairSync extends Sync {
+        // 如果返回true说明前面有节点等待
+        final boolean writerShouldBlock() {
+            // 判断队列中是否有前驱节点在等待
+            return hasQueuedPredecessors();
+        }
+    }
+    
+    ```
+
+    > 写锁获取成功的情况：
+    >
+    > 1. 写锁的线程持有者重入了写锁。
+    > 2. 写锁不被任何线程持有，当前线程竞争得到了锁。
+    >
+    > 写锁获取失败的情况：
+    >
+    > 1. 当前线程不是写锁的持有者。
+    >
+    > 2. `当前只有读锁没有写锁`，不能将读锁升级为写锁。
+    >
+    > 3. 公平锁判断当前线程排在了队列中其他线程后面。
+    >
+    > 4. 尝试CAS修改state失败了。
+    >
+    
+  - tryWriteLock
+
+  ```java
+  final boolean tryWriteLock() {
+      Thread current = Thread.currentThread();
+      int c = getState();
+      if (c != 0) {
+          int w = exclusiveCount(c);
+          if (w == 0 || current != getExclusiveOwnerThread())
+              return false;
+          // 如果等于最大值就抛溢出异常
+          if (w == MAX_COUNT)
+              throw new Error("Maximum lock count exceeded");
+      }
+      // 即使是写锁的持有线程还是通过CAS设置state
+      if (!compareAndSetState(c, c + 1))
+          return false;
+      setExclusiveOwnerThread(current);
+      return true;
+  }
+  ```
+
+  > 与tryAcquire类似，是`非公平、一次性`的获取写锁，写锁计数默认加1。
+
+  - release
+
+    写锁的释放流程与独占锁释放类似，只是tryRelease不同，我们只需要关注AQS的子类实现即可
+
+    ```java
+  // ReentrentReadWriteLock
+    public void unlock() {
+      sync.release(1);
+    }
+  //AQS.release
+    public final boolean release(int arg) {
+        if (tryRelease(arg)) {
+            Node h = head;
+            if (h != null && h.waitStatus != 0)
+                unparkSuccessor(h);
+            return true;
+        }
+        return false;
+    }
+    // boolean/false 释放/不是反
+    protected final boolean tryRelease(int releases) {
+        // 如果不是写锁持有线程则抛出异常
+        if (!isHeldExclusively())
+            throw new IllegalMonitorStateException();
+        // 计算释放后新值
+        int nextc = getState() - releases;
+        // 判断写锁count == 0 写锁是否存在重入
+        boolean free = exclusiveCount(nextc) == 0;
+        // 为true说明已经全部释放
+        if (free)
+            // 清空当前独占线程
+            setExclusiveOwnerThread(null);
+        // 设置state
+        setState(nextc);
+        return free;
+    }
+    ```
+    
+    > 只有`state中低16位值 = 0`的时候才表明写锁释放完毕。
+
+- ReadLock
+
+  读锁就是共享锁的体现，我们直接查看ReentrantReadWriteLock中AQS的子类的`tryAcquireShared`和`tryReleaseShared`实现即可。
+
+  - tryAcquireShared
+
+    ```java
+    // 首先我们知道int返回值的不同代表了共享锁获取的不同情况(和semaphore一致)
+    protected final int tryAcquireShared(int unused) {
+    // 获取当前线程
+        Thread current = Thread.currentThread();
+        // 获取state
+        int c = getState();
+        // 1. 写锁count = 0，说明此时没有写锁。继续执行
+        // 2. 写锁count != 0 ,此时有写锁，但写锁持有者是当前线程。继续执行
+        // 3. 写锁count != 0,此时有写锁，但写锁持有者不是当前线程，获取失败，执行中断。
+        if (exclusiveCount(c) != 0 &&
+            getExclusiveOwnerThread() != current)
+            return -1;
+        // 计算读锁count，无符号右移16位
+        int r = sharedCount(c);
+        // 1. readerShouldBlock 判断是否需要阻塞，false/true 不阻塞/阻塞
+        // 2. 读锁count < MAX_COUNT
+        // 3. 将读锁加1，即state高16位加1
+        if (!readerShouldBlock() &&
+            r < MAX_COUNT &&
+            compareAndSetState(c, c + SHARED_UNIT)) {
+            // 执行到这里说明已经成功将读锁加1
+            // 如果 r = 0说明当前线程是第一个获取读锁的线程，此时不存在竞争
+            if (r == 0) {
+                // 设置firstReader 和 firstReaderHoldCount属性
+                firstReader  = current;
+                firstReaderHoldCount = 1;
+              // 如果r != 0 但 firstReader == current说明
+              // 第一个读锁线程又重入了，那么只要修改firstReaderHoldCount即可
+            } else if (firstReader == current) {
+                // 这里不需要加锁，因为当前线程就是第一个读锁线程，不会有其他线程来操作
+                firstReaderHoldCount++;
+            } else {
+                // 此处说明当前线程不是第一个来获取读锁的线程
+                // 获取当前的cachedHoldCounter，这里存在多线程竞争
+                // 这里的cachedHoldCounter是非volatile的，即使某个线程设置成功
+                // 下个线程也不能立刻获取，随缘
+                HoldCounter rh = cachedHoldCounter;
+                // rh == null 说明是还没有设置过rh，执行a
+                // r != null 说明已经有读锁线程设置过rh 且
+                // 如果rh中的线程id不是当前线程id，那么执行a
+                if (rh == null || rh.tid != getThreadId(current))
+                    // a.将rh 和 cachedHoldCounter 指向ThreadLocal中的HoldCounter
+                    cachedHoldCounter = rh = readHolds.get();
+                // 执行到这里说明 rh.tid = currentThreadId
+                // 如果rh.count = 0，说明这是线程X第一次来获取读锁
+                // 设置currentThread ThreadLocal
+                else if (rh.count == 0)
+                    readHolds.set(rh);
+                // 不论如何rh.count都会+1
+                rh.count++;
+            }
+            // 返回1表明获取成功
+            return 1;
+        }
+        return fullTryAcquireShared(current);
+    }
+    // 公平锁实现
+    static final class FairSync extends Sync {
+        // 判断当前线程是否是队列第一个节点
+        final boolean readerShouldBlock() {
+            return hasQueuedPredecessors();
+        }
+    }
+    // 非公平锁实现
+    static final class NonfairSync extends Sync {
+        final boolean readerShouldBlock() {
+            return apparentlyFirstQueuedIsExclusive();
         }
     }
     ```
-
-    > 1. 读锁和写锁的count不能超过`MAX_COUNT即2^16-1`。
+  
+    > 获取读锁失败原因：
     >
-    > 2. int 型 state 无符号右移16位，得到的即为高16位的count。
-    >
-    > 3. int 型 state 与 `1111 1111 1111 1111`做`与运算`，它的结果也不会超过`1111 1111 1111 1111`，因为`与运算`的规则是`都1为1，否则为0`。
-    >
-    >    ```java
-    >    如int state = 3，那么它的二进制如下
-    >        
-    >      0000 0000 0000 0000 0000 0000 0000 0011
-    >    &                     1111 1111 1111 1111
-    >    ——————————————————————————————————————————    
-    >                          0000 0000 0000 0011
-    >    ```
-    >
-    > 4. 如果读count + 1，那么就等于 `c  =  c + 1 << 16`，如果count + 1，那么`c = c + 1`。
-    >
-    > 5. `如果c 不为 0，当写count = 0时，读count > 0成立`。即读锁已经获取。
-
-  - ThreadLocalHoldCounter
-
-    除了需要记录锁被拿取的总次数，还需要记录每个线程分别拿走多少，所以我们使用[ThreadLocal](#7. ThreadLocal内存泄漏问题)，将记录的工作交给线程自己。
-
+    > 1. `已存在写锁，且获取读锁的线程不是持有写锁的线程。`
+  
+  - apparentlyFirstQueuedIsExclusive
+  
     ```java
-    
+    final boolean apparentlyFirstQueuedIsExclusive() {
+        Node h, s;
+        return (h = head) != null &&
+            (s = h.next)  != null &&
+            !s.isShared()         &&
+            s.thread != null;
+    }
     ```
-
-    
-
-    
+  
+  - tryReleaseShared
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
 
