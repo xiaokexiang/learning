@@ -1,11 +1,15 @@
 package top.leejay.interview.question22;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 /**
  * @author xiaokexiang
  * @date 7/3/2020
  */
 public class ThreadLocalTest2 {
-    private static final ThreadLocal<HoldCount> local = ThreadLocal.withInitial(HoldCount::new);
+    private static final ThreadLocal<HoldCount> readHolds = ThreadLocal.withInitial(HoldCount::new);
+    private static final ExecutorService POOL = Executors.newSingleThreadExecutor();
     private HoldCount cacheHoldCount;
 
     static class HoldCount {
@@ -14,21 +18,74 @@ public class ThreadLocalTest2 {
         final long tid = Thread.currentThread().getId();
     }
 
-    void check() {
+    void lock() {
         HoldCount rh = cacheHoldCount;
         if (rh == null || rh.tid != Thread.currentThread().getId()) {
-            cacheHoldCount = rh = local.get();
+            cacheHoldCount = rh = readHolds.get();
         } else if (rh.count == 0) {
-            local.set(rh);
+            readHolds.set(rh);
         }
         System.out.println("something ...");
         rh.count++;
     }
 
+    void unlock() {
+        HoldCount rh = cacheHoldCount;
+        if (rh == null || rh.tid != Thread.currentThread().getId())
+            rh = readHolds.get();
+        int count = rh.count;
+        if (count <= 1) {
+            readHolds.remove();
+            if (count <= 0)
+                throw new Error("12");
+        }
+        --rh.count;
+    }
+
+    void test() {
+        lock();
+        try {
+            System.out.println("step 1");
+            // 模拟重入读锁
+            test2();
+        } finally {
+            unlock();
+        }
+
+    }
+
+    private void test2() {
+        lock();
+        try {
+            System.out.println("step 2");
+        } finally {
+            unlock();
+        }
+    }
+
+    private void test3() {
+        lock();
+        try {
+            System.out.println("step 3");
+        } finally {
+            unlock();
+            test4();
+        }
+    }
+
+    private void test4() {
+        lock();
+        try {
+            System.out.println("step 4");
+        } finally {
+            unlock();
+        }
+    }
+
     public static void main(String[] args) {
         ThreadLocalTest2 localTest2 = new ThreadLocalTest2();
-        new Thread(localTest2::check, "t1").start();
-        new Thread(localTest2::check, "t2").start();
+        POOL.execute(localTest2::test3);
         System.out.println("main end ...");
+        POOL.shutdown();
     }
 }

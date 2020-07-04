@@ -1748,6 +1748,9 @@ abstract static class Sync extends AbstractQueuedSynchronizer {
 }
 ```
 
+> 1. 这里使用线程ID而不是用线程对象的原因时避免`HoldCounter和ThreadLocal互相绑定导致GC难以释放(可以释放只是需要代价)`，目的就是帮助GC快速回收对象。
+> 2. 定义三个成员变量：cachedHoldCounter、firstReader和firstReaderHoldCount原因是为了`快速判断当前线程是否持有读锁`。
+
 ##### WriteLock
 
 我们从写锁开始入手，写锁就是独占锁的体现。
@@ -1774,9 +1777,8 @@ abstract static class Sync extends AbstractQueuedSynchronizer {
       int w = exclusiveCount(c);
       // c!=0说明有锁，但不知道是什么锁
       if (c != 0) {
-          // state != 0 且 w = 0说明此时存在读锁
-          // 如果当前线程不是持有锁的线程
-          // 两个条件一个成立就获取写锁失败
+          // state != 0 且 w = 0说明此时存在读锁，返回false
+          // w != 0 说明存在写锁，必须要求当前线程是持有写锁的线程，否则返回false
           if (w == 0 || current != getExclusiveOwnerThread())
               return false;
           // 判断写锁count是否超过最大count
@@ -1813,8 +1815,8 @@ abstract static class Sync extends AbstractQueuedSynchronizer {
   }
   
   ```
-
-  > 写锁获取成功的情况：
+  
+> 写锁获取成功的情况：
   >
   > 1. 写锁的线程持有者重入了写锁。
   > 2. 写锁不被任何线程持有，当前线程竞争得到了锁。
@@ -1828,7 +1830,7 @@ abstract static class Sync extends AbstractQueuedSynchronizer {
   > 3. 公平锁判断当前线程排在了队列中其他线程后面。
   >
   > 4. 尝试CAS修改state失败了。
-
+  
 - tryWriteLock
 
 ```java
@@ -1940,11 +1942,12 @@ final boolean tryWriteLock() {
                   // a.将rh 和 cachedHoldCounter 指向ThreadLocal中的HoldCounter
                   cachedHoldCounter = rh = readHolds.get();
               // 执行到这里说明是之前设置过cachedHoldCounter的线程来获取读锁
-              // 如果是之前设置过的cHC的线程来获取，这里的count肯定不会是0
-              // 这里设置的原因是需要结合读锁释放
+              // 运气很好。这里尝试获取结果发现cachedHoldCounter就是当前线程
+              // 如果rh.count = 0就说明当前线程释放了读锁，且没有获取读锁的线程HC=null
+              // 所以这里当rh.count=0时需要设置rh到当前线程ThreadLocal中
               else if (rh.count == 0)
                   readHolds.set(rh);
-              // 不论如何rh.count都会+1
+              // 不论如何rh.count都会+1，注意cacheHoldCounter = rh,所cHC.count也+1
               rh.count++;
           }
           // 返回1表明获取成功
@@ -1979,17 +1982,39 @@ final boolean tryWriteLock() {
   >
   > 5. ①若`rh = null`，那么跳转③。
   >
-  >    ② 若`rh != null 但 HC.tid != currentTid`，说明`rh 不是当前线程的HC`，跳转③。
+  >    ② 若`rh != null 但 HC.tid != currentTid`，说明`上个获取读锁的线程和当前线程不同`，跳转③。
   >
   >    ③ 获取当前线程的`HoldCounter(简称HC)`，跳转⑥。
   >
-  >    ④ 若 `rh != null 但 HC.tid = currentTid`，跳转⑤。
+  >    ④ 若 `rh != null 但 rh.tid = currentTid`，说明`上个获取读锁的线程和当前线程相同`，读锁重入了，跳转⑤。
   >
-  >    ⑤ 若 `rh.count = 0`，设置`当前线程的HC = rh`，此处需要结合读锁释放理解，因为读锁释放的时候会清空ThreadLocal，跳转⑥。
+  >    ⑤ 若 `rh.count = 0`，设置`当前线程的HC = rh`，跳转⑥。
   >
-  >    ⑥ 将`(rh = 当前线程的HC) + 1`，然后` return 1`，tryAcquireShared方法结束。
+  >    ⑥ 至此`rh = 当前线程的HC`，将`rh++的同时cachedHoldCounter++`，然后` return 1`，tryAcquireShared方法结束。
   >
-  > 6. 获取共享锁成功后的代码，都是在处理
+  > 6. step5 中比较疑惑的是何时`else if(rh.count == 0)`成立？这里需要涉及到读锁释放的代码来帮助理解。
+  >
+  >    ```java
+  >    HoldCounter rh = cachedHoldCounter;
+  >    if (rh == null || rh.tid != getThreadId(current))
+  >        rh = readHolds.get();
+  >    int count = rh.count;
+  >    if (count <= 1) {
+  >        readHolds.remove();
+  >        if (count <= 0)
+  >            throw unmatchedUnlockException();
+  >    }
+  >    --rh.count;
+  >    ```
+  >
+  >    > 首先我们需要明确，在`读锁释放过程中，它只是清空了线程的貌私有HC，并没有处理cHC`。
+  >    >
+  >    > 我们假设线程A（非第一个获取读锁的线程）获取了读锁，释放读锁后再一次获取读锁这个流程来分析：
+  >    >
+  >    > 1. 线程A获取读锁成功进入else分支后，它会设置`threadA.HoldCounter.count = cacheHoldCounter = 1`，进线程A读锁释放，`rh = cacheHoldCounter != null`且此时count = 1，执行`readHolds.remove()`，然后`--rh.count`，这样`cacheHoldCounter.count也要减1，变成了0`。
+  >    > 2. 此时线程A继续获取读锁成功，进入读锁else判断流程发现`rh = cacheHoldCounter != null`，且`rh.tid = currentTid`，所以执行`else if (rh.count == 0)`判断，此时该条件成立，并且当前线程的HC = null，所以这里需要设置当前线程的HC。代码的目的就是为了保证`读锁的获取-释放之后再获取读锁时，不会因为之前读锁的释放导致当前线程的HC为null`。
+  >
+  > 7. 获取共享锁成功后的代码，都是在处理
   >
   >    `firstReader`：第一个获取读锁的线程。
   >
@@ -2172,16 +2197,21 @@ final boolean tryWriteLock() {
           if (rh == null || rh.tid != getThreadId(current))
               rh = readHolds.get();
           // 执行到此rh = 当前线程的HC
+          // 如果rh != null 且 rh.tid = getThreadId(current)
+          // 说明cachedHoldCounter恰好是当前线程的HC
           int count = rh.count;
           // 如果rh.count > 1说明该线程的读锁重入了
           // 如果rh.count = 1说明该线程的读锁获取了一次
-          // 如果rh.count = 0说明当前线程没有持有过读锁，没有获取直接释放读锁
           if (count <= 1) {
+              // 清空当前线程的HoldCounter，但是不处理cachedHoldCounter
               readHolds.remove();
+              // 如果rh.count = 0说明当前线程没有持有过读锁，抛异常
               if (count <= 0)
                   throw unmatchedUnlockException();
           }
-          // 将读锁减1
+          // 将rh.count减1的同时，如果cachedHoldCounter!= null
+          // cachedHoldCounter.count 也要减1
+          // 因为他们指向了都是当前线程私有的HoldCounter
           --rh.count;
       }
       //虽然读锁减1了，但是关键变量state还没有修改
@@ -2194,24 +2224,97 @@ final boolean tryWriteLock() {
       }
   }
   ```
+  
+   > 1. 读锁的释放容易理解，就是判断当前线程的读锁是否是重入锁，以及将每个线程中的`HoldCounter`中的`count-1`。
+   > 2. 需要注意执行到`--rh.count;`，如果`cachedHoldCounter != null（说明cachedHoldCounter 恰好是当前线程的HC）`那么除了`rh.count，cachedHoldCounter.count`也需要减1。
+   > 3. `if (count <= 1) `何时`count = 0`？说明当前线程没有持有过读锁，就调用了释放读锁的方法。
+   > 4. 只有读写锁完全释放，tryReleaseShared才返回true，继而调用`doReleaseShared`方法。
+##### 锁升级与降级
 
-  > 1. 读锁的释放容易理解，就是判断当前线程的读锁是否是重入锁，以及将每个线程中的`HoldCounter`中的`count-1`。
-  > 2. `if (count <= 1) `何时`count = 0`？说明当前线程没有持有过读锁，就调用了释放读锁的方法。
-  > 3. 只有读写锁完全释放，tryReleaseShared才会返回true，才会继而调用`doReleaseShared`方法。
+读锁线程多个线程共享的，而写锁单个线程独占的，所以写锁的并发限制比读锁高。
+
+基于以上定义：
+
+1. 同一个线程中，`在释放读锁的前，获取了写锁`，这种情况叫做`锁升级`（读写锁不支持）。
+
+   我们知道获取写锁的前提条件是`读锁释放完毕`，假设此时有两个读锁线程都想获取写锁，这两个线程都想释放除自己以外的读锁，但是他们都在等对方释放，那么会导致`死锁`。究其原因：读锁是多线程共享的，大家都有读锁，凭啥我要让着你去释放我自己的读锁，都不让那就死锁了。
+
+2. 同一个线程中，`在释放写锁的前，获取了读锁`，这种情况叫做`锁降级`（读写锁支持）。
+
+   那为什么支持锁降级呢？因为`写锁是独占的`，此刻只有我一个人持有写锁，所以我想获取读锁就获取，不会有其他人和我抢读锁（除非这个读锁本身，但只是读锁重入而已不会产生竞争）。
+
+总结：
+
+- 如果有一线程持有读锁，那么此时其他线程（包括已持有读锁线程）无法获取写锁`（获取写锁的前提条件是所有的读锁释放完毕）`。
+
+- 如果有一线程持有读锁，那么其他线程（包括已持有读锁线程）是可以获取读锁的，读写互斥，读读不互斥。
+
+- 如果有一线程持有写锁，（除非是持有写锁线程本身）否则其他线程都不能获取读锁/写锁。写读/写写互斥。
+
+  ```java
+  public class CachedDate {
+      Object data;
+      volatile boolean cacheValid;
+      final ReentrantReadWriteLock rwl = new ReentrantReadWriteLock();
+  
+      void processCachedData() {
+          // 先获取读锁
+          rwl.readLock().lock();
+          // 判断cacheValid即缓存是否可用
+          if (!cacheValid) {
+              // 到这里说明cache可用准备写值
+              // 需要先释放读锁在获取写锁
+              rwl.readLock().unlock();
+              rwl.writeLock().lock();
+              try {
+                  // 需要再次简要cacheValid，防止其他线程在此期间改过该值
+                  // 在use方法之前获取写锁写入data值及修改cacheValid状态
+                  if (!cacheValid) {
+                      data = System.currentTimeMillis();
+                      cacheValid = true;
+                  }
+                  // 这里就是锁降级。在写锁释放之前先获取读锁。
+                  rwl.readLock().lock();
+              } finally {
+                  // 释放写锁
+                  rwl.writeLock().unlock();
+              }
+          }
+          // 模拟执行use前的耗时操作
+  		Thread.sleep(1000L);
+          try {
+              // 对缓存数据进行打印
+              use(data);
+          } finally {
+              // 最终释放读锁
+              rwl.readLock().unlock();
+          }
+      }
+      // 只是打印缓存值
+      void use(Object data) {
+          System.out.println("use cache data " + data);
+      }
+  }
+  ```
+
+  > Q：为什么要在写锁释放前，获取读锁呢？
+  >
+  > A：如果线程A修改了值V，在释放写锁前没有获取读锁，那么在调用use()方法前，线程B获取了写锁，并修改了值V，这个修改`对线程A是不可见的`。最终打印的data可能是线程B修改的值。
+  >
+  > Q：锁降级是否是必要的？
+  >
+  > A：如果线程A在执行use时传递的`想是自己修改的数据，那么需要锁降级`。如果希望传递的是最新的数据，那么不需要锁降级。
+
+##### 读写锁总结
+
+- ReetrentReadWriteLock通过将state变量分为高低16位来解决记录读锁写锁获取的总数。
+- 读锁的私有变HoldCounter记录者当前线程获取读锁的次数，底层通过`ThreadLocal`实现。
+- 读锁的非公平获获取，通过`apparentlyFirstQueuedIsExclusive`方法一定概率防止了写锁无限等待。
+- 当线程A获取写锁时，会因为其他持有`写锁（不包括线程A）`或`读锁（包括线程A）`的线程而阻塞。
+- 当线程A获取读锁时，会因为其他持有`写锁（不包括线程A)`而阻塞。
+
+---
 
 #### CountDownLatch
 
 #### CyclicBarrier
-
-
-
-
-
-
-
-
-
-
-
-
-
