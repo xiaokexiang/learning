@@ -34,7 +34,7 @@ public class CachedDate {
                     cacheValid = true;
                 }
                 // 这里就是锁降级。在写锁释放之前先获取读锁。
-//                rwl.readLock().lock();
+                rwl.readLock().lock();
             } finally {
                 // 释放写锁
                 rwl.writeLock().unlock();
@@ -45,7 +45,7 @@ public class CachedDate {
             use(data);
         } finally {
             // 最终释放读锁
-//            rwl.readLock().unlock();
+            rwl.readLock().unlock();
         }
     }
 

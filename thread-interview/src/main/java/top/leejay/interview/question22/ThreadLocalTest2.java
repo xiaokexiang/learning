@@ -42,6 +42,7 @@ public class ThreadLocalTest2 {
         --rh.count;
     }
 
+    // 模拟锁重入
     void test() {
         lock();
         try {
@@ -63,6 +64,7 @@ public class ThreadLocalTest2 {
         }
     }
 
+    // 模拟同一线程先释放锁再获取锁
     private void test3() {
         lock();
         try {
