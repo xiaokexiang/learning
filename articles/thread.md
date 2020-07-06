@@ -300,7 +300,7 @@ volatile保证了内存的可见性，对于共享变量操作会直接从共享
 
 #### ThreadLocal内存泄漏
 
-ThreadLocal变量，是Thread类的成员变量，因为`类的每个实例的成员变量都是这个实例独有的`，所以在不同的Thread中有不同的副本，每个线程的副本`只能由当前线程使用，线程间互不影响`。因为一个线程可以拥有多个ThreadLocal对象，所以其内部使用`ThreadLocalMap<ThreadLocal<?>, Object>`来实现。
+ThreadLocal类，底层由`ThreadLocalMap`实现，是Thread类的成员变量，因为`类的每个实例的成员变量都是这个实例独有的`，所以在不同的Thread中有不同的副本，每个线程的副本`只能由当前线程使用，线程间互不影响`。因为一个线程可以拥有多个ThreadLocal对象，所以其内部使用`ThreadLocalMap<ThreadLocal<?>, Object>`来实现。
 
 ```java
 public class Thread implements Runnable {
@@ -341,9 +341,11 @@ public class ThreadLocal<T> {
 
 总结如下：
 
-> `Thread生命周期没有结束，ThreadLocal对象被回收后没有调用过get、set或remove方法就会导致内存泄漏。`
+> `Thread生命周期还没有结束，ThreadLocal对象被回收后且没有调用过get、set或remove方法就会导致内存泄漏。`
 
-我们可以看出内存泄漏的触发条件比较苛刻的，但确实会发生，其实`只要线程Thread的生命周期结束，那么Thread的ThreadLocalMap也不会存在强引用，那么ThreadLocalMap中的value最终也会被回收。`，所以在使用ThreadLocal时，除了需要密切关注`Thread和ThreadLocal的生命周期`，还需要在每次使用完之后调用`remove`方法，这样做还有一个好处就是，如果你使用的是线程池，那么会出现`线程复用`的情况，如果不及时清理会导致下次使用的值不符合预期。
+我们可以看出内存泄漏的触发条件比较苛刻的，但确实会发生，其实`只要线程Thread的生命周期结束，那么Thread的ThreadLocalMap也不会存在强引用，那么ThreadLocalMap中的value最终也会被回收。`，所以在使用ThreadLocal时，除了需要密切关注`Thread和ThreadLocal的生命周期`，还需要在每次使用完之后调用`remove`方法，这样做还有一个问题就是：
+
+> 如果你使用的是线程池，那么会出现`线程复用`的情况，如果`不及时清理remove()会导致下次使用的值不符合预期`。
 
 ---
 
@@ -664,35 +666,35 @@ Lock与Synchronized都是`可重入锁`，否则会发生死锁。Lock锁核心�
 
 ![](https://image.leejay.top/image/20200608/GVtL7ztzwtCl.png?imageslim)
 
-- 记录当前锁的持有线程
+##### 记录当前锁的持有线程
 
-  由AQS的父类`AbstractOwnableSynchronizer`实现记录当前锁的持有线程功能。
+由AQS的父类`AbstractOwnableSynchronizer`实现记录当前锁的持有线程功能（独占锁）。
 
-- state变量
+##### state变量
 
-  内部维护了volatile修饰的state变量，state = 0时表明没有线程获取锁，state = 1时表明有一个线程获取锁，当state > 1时，说明该线程重入了该锁。
+内部维护了volatile修饰的state变量，state = 0时表明没有线程获取锁，state = 1时表明有一个线程获取锁，当state > 1时，说明该线程重入了该锁。
 
-- 线程阻塞和唤醒
+##### 线程阻塞和唤醒
 
-  由`LockSupport`类实现，其底层是调用了Unsafe的park 和 unpark。`如果当前线程是非中断状态，调用park()阻塞，返回中断状态是false，如果当前线程是中断状态，调用park()会不起作用立即返回。也是为什么AQS要清空中断状态的原因`。
+由`LockSupport`类实现，其底层是调用了Unsafe的park 和 unpark。`如果当前线程是非中断状态，调用park()阻塞，返回中断状态是false，如果当前线程是中断状态，调用park()会不起作用立即返回。也是为什么AQS要清空中断状态的原因`。
 
-- FIFO队列
+##### FIFO队列
 
-  AQS内部维护了一个基于`CLH(Craig, Landin, and Hagersten(CLH)locks。基于链表的公平的自旋锁)`变种的FIFO双向链表阻塞队列，在等待机制上由自旋改成阻塞唤醒(park/unpark)。
+AQS内部维护了一个基于`CLH(Craig, Landin, and Hagersten(CLH)locks。基于链表的公平的自旋锁)`变种的FIFO双向链表阻塞队列，在等待机制上由自旋改成阻塞唤醒(park/unpark)。
 
-  ![](https://image.leejay.top/image/20200609/CHJldTlsLVp2.png?imageslim)
+![](https://image.leejay.top/image/20200609/CHJldTlsLVp2.png?imageslim)
 
-  > 还未初始化的时候，head = tail = null，之后初始化队列，往其中假如阻塞的线程时，会新建一个空的node，让head和tail都指向这个空node。之后加入被阻塞的线程对象。当head=tai时候说明队列为空。
+> 还未初始化的时候，head = tail = null，之后初始化队列，往其中假如阻塞的线程时，会新建一个空的node，让head和tail都指向这个空node。之后加入被阻塞的线程对象。当head=tai时候说明队列为空。
 
-- Node的waitStatus
+##### Node的waitStatus
 
-  | Node状态     | 描述                                                         |
-  | :----------- | :----------------------------------------------------------- |
-  | INIT=0       | Node初始创建时默认为0                                        |
-  | CANCELLED=1  | 由于超时或者中断，线程获取锁的请求取消了，节点一旦变成此状态就不会再变化。 |
-  | SIGNAL=-1    | 表示线程已经准备好了，等待资源释放去获取锁。                 |
-  | CONDITION=-2 | 表示节点处于等待队列中，等待被唤醒。                         |
-  | PROPAGATE=-3 | 只有当前线程处于SHARED情况下，该字段才会使用，用于共享锁的获取。 |
+| Node状态     | 描述                                                         |
+| :----------- | :----------------------------------------------------------- |
+| INIT=0       | Node初始创建时默认为0                                        |
+| CANCELLED=1  | 由于超时或者中断，线程获取锁的请求取消了，节点一旦变成此状态就不会再变化。 |
+| SIGNAL=-1    | 表示线程已经准备好了，等待资源释放去获取锁。                 |
+| CONDITION=-2 | 表示节点处于等待队列中，等待被唤醒。                         |
+| PROPAGATE=-3 | 只有当前线程处于SHARED情况下，该字段才会使用，用于共享锁的获取。 |
 
 ####  ReentrentLock
 
@@ -2376,7 +2378,7 @@ Sync(int count) {
 }
 ```
 
-> CountDownLatch的构造函数，需要传入一个`大于0的值N`。
+> CountDownLatch的构造函数，需要传入一个`大于0的值N`表明执行`countDown`线程数量。
 >
 > 如果`N = 0`表明条件符合，表明子线程已经全部执行完毕，主线程可以继续执行。
 
@@ -2461,12 +2463,314 @@ protected int tryAcquireShared(int acquires) {
 
 ##### 总结
 
-- 使用场景：当某个量化为数字的条件被满足后，调用await的线程才可以继续开始执行
+- 使用场景：当`某个量化为数字的条件被满足后`，调用await的线程才可以继续开始执行
 
 - CountDownLatch的构造函数需要`显式的传入计数器的值`。
-- 调用`await`方法的线程能够继续往下执行的条件就是`state = 0`，否则继续阻塞。
+- 调用`await`方法的线程能继续执行的条件就是`state = 0（也是获取共享锁的条件）`，否则继续阻塞。
 - 调用`countDown`方法才能修改state的值，且每次调用只能将`state - 1`。
 
 ---
 
 #### CyclicBarrier
+
+基于`CountDownLatch`的特性：`计数器为0时，即使调用await，该线程也不会等待其他线程执行完毕而被阻塞`。
+
+`CyclicBarrier`的出现是为了解决复杂场景`CountDownLatch`使用的劣势。
+
+> CountDownLatch中存在两种类型的线程：分别是`调用await方法和调用countDown方法的线程`。
+>
+> 而CyclicBarrier中只存在一种线程：调用await的线程扮演了上述两种角色，即先countDown后await。
+
+`CyclicBarrier`拆分成两部分来理解：
+
+- Cyclic（回环）：当所有等待线程执行完毕后，会重置状态，使其能够重用。
+- Barrier（屏障）：线程调用await方法就会阻塞，这个阻塞点就是`屏障点`，等到`所有线程调用await方法`后，线程就会穿过屏障继续往下执行。
+
+> 相比`CountDownLatch`只使用一次，`CyclicBarrier`更强调循环使用。
+
+```java
+@Slf4j
+public class CyclicBarrierTest {
+
+    // 传入每次屏障之前需要等待的线程数量
+    private static final CyclicBarrier BARRIER = new CyclicBarrier(2, () -> {
+        // 不能保证每代执行该语句的都是同一个线程
+        log.info("doSomenthing before the last thread signal other threads")
+    });
+    private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(2);
+
+    public static void main(String[] args) {
+        EXECUTOR.execute(() -> {
+            try {
+                //CyclicBarrier 保证await
+                log.info("doSomething ... ");
+                BARRIER.await();
+                log.info("continue exec ...");
+                BARRIER.await();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+        EXECUTOR.execute(() -> {
+            try {
+                log.info("doSomething ... ");
+                BARRIER.await();
+                log.info("continue exec ...");
+                // 如果中断线程，那么会抛出异常
+                // Thread.currentThread().interrupt();
+                BARRIER.await();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+        EXECUTOR.shutdown();
+    }
+}
+// doSomething
+// doSomething
+// continue exec
+// continue exec
+```
+
+> 为什么结果不是随机打印日志，而是先打印完`doSomething`，再打印`continue exec`?
+
+##### CyclicBarrier
+
+```java
+// 使用ReentrantLock和Condition
+private final ReentrantLock lock = new ReentrantLock();
+private final Condition trip = lock.newCondition();
+
+// 注意这里是final修饰，代表线程总数，当count=0时重置使用
+private final int parties;
+// 表明还需要多少个线程到达屏障
+private int count;
+
+// 表明每一代线程通过屏障之前需要完成的事情（并不是通过新起线程来实现）
+private final Runnable barrierCommand;
+// 每一组一起通过屏障的线程叫做一代Generation，不同代之间通过==比较
+private Generation generation = new Generation();
+
+public CyclicBarrier(int parties, Runnable barrierAction) {
+    // paries的值必须大于0
+    if (parties <= 0) throw new IllegalArgumentException();
+    this.parties = parties;
+    this.count = parties;
+    this.barrierCommand = barrierAction;
+}
+
+// Generation只有一个属性：broken
+private static class Generation {
+    // false 表明线程是全部到达后一起穿过屏障
+    // true表明线程没有全部到达前，就有线程穿过屏障了
+    // 线程监测到会抛出BrokenBarrierException
+    boolean broken = false;
+}
+```
+
+> 1. `CyclicBarrier`的需要借助`Condition`来实现，执行`await的线程`需要加入条件队列等待唤醒。
+> 2. `parties`是final修饰的变量，作用于count = 0时的`重新复位计数器`。
+> 3. `Generation`表示一组一起通过屏障的线程，不同代之间通过`==`来比较。
+> 4. `barrierCommand`用于每代线程通过屏障之前需要完成的事情（不会另起线程执行）。
+> 5. 每代都包含一定`parties`的线程，通过属性`broken = true`来表明当代线程全部作废。
+
+##### nextGeneration
+
+```java
+private void nextGeneration() {
+    // 唤醒上一代的线程（表明此时是有锁的）
+    trip.signalAll();
+    // 将count重置为parties
+    count = parties;
+    // new 生成新一代
+    generation = new Generation();
+}
+```
+
+> 该方法的目的是为了`唤醒上一代的线程，并重置count及通过创建对象开启下一代`。
+
+##### breakBarrier
+
+```java
+private void breakBarrier() {
+    // 修改Generation对象参数
+    generation.broken = true;
+    // 重置计数器
+    count = parties;
+    // 唤醒上一代等地的线程
+    trip.signalAll();
+}
+```
+
+> 与`nextGeneration`不同点在于：修改`Generation对象`参数，以及`没有创建下一代Generation`。
+
+##### reset
+
+```java
+public void reset() {
+    final ReentrantLock lock = this.lock;
+    lock.lock();
+    try {
+        breakBarrier();   // break the current generation
+        nextGeneration(); // start a new generation
+    } finally {
+        lock.unlock();
+    }
+}
+```
+
+> reset方法在获取锁的前提下调用了`breakBarrier 和 nextGeneration`方法，除了`修改这一代Generation的broken、重置计数器外，还创建了下一代Generation`（虽然代码有些重复）。
+
+##### await
+
+```java
+// 同一个线程可能多次调用await方法
+// 返回值表明还需要多少个线程到达屏障处
+public int await() throws InterruptedException, BrokenBarrierException {
+    try {
+        // false表明不需要判断超时
+        return dowait(false, 0L);
+    } catch (TimeoutException toe) {
+        // await()中的dowait按道理不会抛出该异常
+        throw new Error(toe);
+    }
+}
+
+private int dowait(boolean timed, long nanos) throws InterruptedException, 										BrokenBarrierException, TimeoutException {
+    final ReentrantLock lock = this.lock;
+    // 获取独占锁
+    lock.lock();
+    try {
+        // 获取这一代的Generation
+        final Generation g = generation;
+		// 之前breakBarrier方法会修改broken参数为true，如果线程监测到会抛出异常
+        if (g.broken)
+            throw new BrokenBarrierException();
+        // 该方法响应中断，抛出中断异常前会调用breakBarrier
+        if (Thread.interrupted()) {
+            breakBarrier();
+            throw new InterruptedException();
+        }
+		// 此中代码不需要考虑竞争
+        // 将count-1类似countDownLatch中的countDown
+        int index = --count;
+        if (index == 0) { 
+            // index = 0说明除当前线程外的其他线程都执行了await方法
+            // 当前需要准备带领其他线程一起冲破屏障了
+            boolean ranAction = false;
+            try {
+                // 执行冲破屏障前的任务
+                final Runnable command = barrierCommand;
+                // 这里可以看出，没有另起线程去执行，就是当前线程处理的
+                if (command != null)
+                    command.run();
+                // 修改ranAction参数
+                ranAction = true;
+                // 调用nextGeneration唤醒所有等待线程、重置count并创建下一代
+                nextGeneration();
+                return 0;
+            } finally {
+                // 如果当前线程执行command任务失败
+                if (!ranAction)
+                    // 调用breakBarrier
+                    breakBarrier();
+            }
+        }
+
+        // 执行到此说明当前线程不是当代最后一个线程
+        // 自旋直到被中断、await超时、broken=true或count=0
+        for (;;) {
+            try {
+                // 进行await(time)方法的处理
+                if (!timed)
+                    // 当前count!=0，所以将当前线程放入条件队列等待唤醒
+                    // 唤醒后从此处继续执行
+                    trip.await();
+                else if (nanos > 0L)
+                    // Condition.await(指定时长)
+                    // 返回的是deadline - currentTime的差值
+                    nanos = trip.awaitNanos(nanos);
+            } catch (InterruptedException ie) {
+                // 如果当前线程被中断执行此处逻辑
+                // 判断当前线程的generation是否改变，如果没有改变且g.broken的值是false
+                // 执行breakBarrier方法并抛出中断异常
+                if (g == generation && ! g.broken) {
+                    breakBarrier();
+                    throw ie;
+                } else {
+                    // 执行到此处
+                    // 要么是Generation已经更新了，那么不能执行breakBarrier影响这一代
+                    // 要么是g.broken = true，说明已经执行过breakBarrier，那就不再执行
+                    // 最终修改当前线程中断位位true
+                    Thread.currentThread().interrupt();
+                }
+            }
+			// 此时还在循环中，继续判断broken
+            if (g.broken)
+                throw new BrokenBarrierException();
+			// 执行到此如果不是同一代，那么此时只有两种可能
+            // 1. 当前线程await后被唤醒，发现代已经更新，即最后一个线程已执行过。直接返回即可
+            // 2. reset方法被调用，它其中的nextGeneration创建了新一代。
+            if (g != generation)
+                return index;
+			
+            // 执行到此说明broken = false 且 代没有更新，最后一个线程还没来
+            // 继续判断是否超时，如果超时调用breakBarrier并抛出异常
+            if (timed && nanos <= 0L) {
+                breakBarrier();
+                throw new TimeoutException();
+            }
+        }
+    } finally {
+        // 最终释放锁
+        lock.unlock();
+    }
+}
+```
+
+> 1. await方法是响应中断的，并且如果`Generation.broken = true`则会抛出指定异常。
+> 2. 若当前线程恰好是执行`当前代执行await方法的最后一个线程`，那么它会执行`barrierCommand`。
+> 3. 若不是当前代的最后一个线程，那么会进入`自旋`，加入条件队列阻塞`直到被最后一个线程唤醒`。
+> 4. CyclicBarrier暴露了`reset`方法，只有通过这个方法才能`显式中断这一代、重置count和开启下一代`。
+
+##### await(time)
+
+```java
+public int await(long timeout, TimeUnit unit)
+throws InterruptedException, BrokenBarrierException,TimeoutException {
+    return dowait(true, unit.toNanos(timeout));
+}
+
+// 下面是与await方法唯二不同的地方
+private int dowait(boolean timed, long nanos){
+    ...
+    for(;;) {
+        if (!timed)
+            trip.await();
+        else if (nanos > 0L)
+            // 执行的是Condition.await(time)方法
+            nanos = trip.awaitNanos(nanos);
+        ...
+    }
+    ...
+    if (timed && nanos <= 0L) {
+       breakBarrier();
+        // await并不会抛出此异常
+       throw new TimeoutException();
+    }
+}
+```
+
+> await(time)方法与await大部分是相同的，区别在于：
+>
+> 1. await(time)执行的是Condition.await(time)方法，到时`自动唤醒（底层LockSupprt.parkNanos）`来实现的。
+> 2. await(time)会`抛出TimeoutException`异常。
+
+##### 总结
+
+- CyclicBarrier和CountDownLatch类似，都要传入`int值来设置计数器（区别：前者>0，后者>=0）`。
+- CyclicBarrier的countDown和await都`由同一个线程实现`，而CountDownLatch由两种线程分别实现。
+- CyclicBarrier实现了循环利用，每有`parties`个线程到达屏障，就`生成新一代并唤醒老一代线程从await处退出`继续执行各自线程中的代码，直到代码执行完毕或下一个await。
+
+---
+
