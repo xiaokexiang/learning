@@ -34,7 +34,7 @@ public class CyclicBarrierTest {
         });
         EXECUTOR.execute(() -> {
             try {
-                log.info("doSomethting ... ");
+                log.info("doSomething ... ");
                 BARRIER.await();
                 log.info("continue exec ...");
                 BARRIER.await();
