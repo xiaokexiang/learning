@@ -1,5 +1,6 @@
 package top.leejay.interview.question23;
 
+import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.SynchronousQueue;
 
@@ -8,13 +9,14 @@ import java.util.concurrent.SynchronousQueue;
  * @date 7/8/2020
  */
 public class BlockingQueueTest {
-    private static final LinkedBlockingQueue<Integer> queue = new LinkedBlockingQueue<>(2 << 32);
+    private static final LinkedBlockingQueue<Integer> queue = new LinkedBlockingQueue<>(10);
+    private static final LinkedBlockingDeque<Integer> deque = new LinkedBlockingDeque<>(10);
     private static final SynchronousQueue<Integer> SYNCHRONOUS_QUEUE = new SynchronousQueue<>();
     public static void main(String[] args) {
         new Thread(() -> {
             for (int i = 0; i < 10; i++) {
                 try {
-                    queue.put(i);
+                    deque.putFirst(i);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
@@ -30,7 +32,7 @@ public class BlockingQueueTest {
                     e.printStackTrace();
                 }
             }
-        }).start();
+        });
 //        new Thread(() -> {
 //            try {
 //                SYNCHRONOUS_QUEUE.put(123);

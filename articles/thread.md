@@ -94,7 +94,7 @@ void daemon() {
 
   Thread类的实例方法，用于中断线程，但只是设置线程的中断标志位。
 
--  isInterrupted()
+- isInterrupted()
 
   Thread类的实例方法，用于判断当前线程是否中断，`该方法不会重置线程中断标志位`。
 
@@ -1817,21 +1817,21 @@ abstract static class Sync extends AbstractQueuedSynchronizer {
   }
   
   ```
-  
+
 > 写锁获取成功的情况：
-  >
-  > 1. 写锁的线程持有者重入了写锁。
-  > 2. 写锁不被任何线程持有，当前线程竞争得到了锁。
-  >
-  > 写锁获取失败的情况：
-  >
-  > 1. 当前线程不是写锁的持有者。
-  >
-  > 2. `当前只有读锁没有写锁`，不能将读锁升级为写锁。
-  >
-  > 3. 公平锁判断当前线程排在了队列中其他线程后面。
-  >
-  > 4. 尝试CAS修改state失败了。
+>
+> 1. 写锁的线程持有者重入了写锁。
+> 2. 写锁不被任何线程持有，当前线程竞争得到了锁。
+>
+> 写锁获取失败的情况：
+>
+> 1. 当前线程不是写锁的持有者。
+>
+> 2. `当前只有读锁没有写锁`，不能将读锁升级为写锁。
+>
+> 3. 公平锁判断当前线程排在了队列中其他线程后面。
+>
+> 4. 尝试CAS修改state失败了。
 
 - tryWriteLock
 
@@ -2226,11 +2226,12 @@ final boolean tryWriteLock() {
       }
   }
   ```
-  
+
    > 1. 读锁的释放容易理解，就是判断当前线程的读锁是否是重入锁，以及将每个线程中的`HoldCounter`中的`count-1`。
    > 2. 需要注意执行到`--rh.count;`，如果`cachedHoldCounter != null（说明cachedHoldCounter 恰好是当前线程的HC）`那么除了`rh.count，cachedHoldCounter.count`也需要减1。
    > 3. `if (count <= 1) `何时`count = 0`？说明当前线程没有持有过读锁，就调用了释放读锁的方法。
    > 4. 只有读写锁完全释放，tryReleaseShared才返回true，继而调用`doReleaseShared`方法。
+
 ##### 锁升级与降级
 
 读锁线程多个线程共享的，而写锁单个线程独占的，所以写锁的并发限制比读锁高。
@@ -2424,7 +2425,7 @@ protected boolean tryReleaseShared(int releases) {
    // 自旋CAS修改state
     for (;;) {
         int c = getState();
-        // 如果怕state已经是0直接返回，不然state为负数了
+        // 如果state已经是0直接返回，不然state为负数了
         if (c == 0)
             return false;
         int nextc = c-1;
@@ -2479,7 +2480,7 @@ protected int tryAcquireShared(int acquires) {
 
 > CountDownLatch中存在两种类型的线程：分别是`调用await方法和调用countDown方法的线程`。
 >
-> 而CyclicBarrier中只存在一种线程：调用await的线程扮演了上述两种角色，即先countDown后await。
+> 而CyclicBarrier中只存在一种线程：`调用await的线程扮演了上述两种角色，即先countDown后await`。
 
 `CyclicBarrier`拆分成两部分来理解：
 
@@ -3472,7 +3473,7 @@ void print() {
 
 ##### 概念
 
-`BlockingQueue`带阻塞功能的`线程安全`队列，但队列已满时会阻塞添加者，当队列为空时会阻塞获取者。它本身是一个接口，具体的功能由它的实现类来完成。
+`BlockingQueue`带`阻塞`功能的`线程安全`队列，但队列已满时会阻塞添加者，当队列为空时会阻塞获取者。它本身是一个接口，具体的功能由它的实现类来完成。
 
 ![](https://image.leejay.top/image/20200707/w6jIy7hJTtxv.png?imageslim)
 
@@ -3750,7 +3751,7 @@ final E itemAt(int i) {
 
 ##### 总结
 
-- `ArrayBlockingQueue`是有界的阻塞队列，最大支持`Integer.MAX_VALUE`。
+- `ArrayBlockingQueue`是有界（需要指定初始队列大小）的阻塞队列，最大容量不超过`Integer.MAX_VALUE`。
 - `ArrayBlockingQueue`遵循`FIFO先进先出的顺序规则`。
 - `ArrayBlockingQueue`中的方法是线程安全的，是通过`独占锁`实现的。
 - `ArrayBlockingQueue`因为只有一把锁，所以并不是真正的`同时添加和获取`。
@@ -4041,10 +4042,10 @@ public E peek() {
 
 ##### 总结
 
-- `LinkedBlockingQueue`有界或无界（有界： 有最大值，无界： 不需要指定队列大小。看你怎么理解）队列，默认`capacity = Integer.MAX_VALUE`。
+- `LinkedBlockingQueue`是无界（可以不传递初始队列大小）队列，不指定容量时默认`Integer.MAX_VALUE`。
 - `LinkedBlockingQueue`的底层是由`链表组成的`，它`head.item = null, last.next  = null`是永远成立的。并且它也符合`FIFO`规则。
 - `LinkedBlockingQueue`拥有两把锁，分别对应着put和take，所以count变量需要同步。
-- `LinkedBlockingQueue`可以实现`逻辑上真正的同时take和put`。
+- `LinkedBlockingQueue`可以实现`逻辑上真正的同时take和put`，所以性能更强。
 
 ---
 
@@ -4115,51 +4116,653 @@ public interface BlockingDeque<E> extends BlockingQueue<E>, Deque<E> {
 
 我们以`LinkedBlockingDeque`为切入点了解`双端队列`的实现。
 
-##### 构造函数
+##### 构造
 
 ```java
 public class LinkedBlockingDeque<E>
     extends AbstractQueue<E>
     implements BlockingDeque<E>, java.io.Serializable {
+    // 内部维护的静态内部类是双向节点
 	static final class Node<E> {
         E item;
-        Node<E> prev;
+        Node<E> prev;// 区别
         Node<E> next;
         Node(E x) {
             item = x;
         }
     }
+    // (first == null && last == null) || 
+    // (first.prev == null && first.item != null) 规则不变
 	transient Node<E> first;
-
-    /**
-     * Pointer to last node.
-     * Invariant: (first == null && last == null) ||
-     *            (last.next == null && last.item != null)
-     */
+    // (first == null && last == null) ||
+    // (last.next == null && last.item != null) 规则不变
     transient Node<E> last;
-
-    /** Number of items in the deque */
     private transient int count;
-
-    /** Maximum number of items in the deque */
     private final int capacity;
-
-    /** Main lock guarding all access */
+    // 内部仍是一把锁 两个条件队列
     final ReentrantLock lock = new ReentrantLock();
-
-    /** Condition for waiting takes */
+    // 等待获取 条件队列
     private final Condition notEmpty = lock.newCondition();
-
-    /** Condition for waiting puts */
+    // 等待添加  条件队列
     private final Condition notFull = lock.newCondition();
     public LinkedBlockingDeque() {
         this(Integer.MAX_VALUE);
     }
-
     public LinkedBlockingDeque(int capacity) {
         if (capacity <= 0) throw new IllegalArgumentException();
         this.capacity = capacity;
     }
 }
 ```
+
+> 与`LinkedBlockingQueue`构造区别：
+>
+> 1. `内部维护是双链表节点，拥有prev和next指针`。
+> 2. 队列初始化后，first和last节点的item != null，
+
+##### 添加
+
+- putFirst
+
+```java
+// 添加元素到队首，队列满就阻塞等待
+public void putFirst(E e) throws InterruptedException {
+    // 判断是否为null
+    if (e == null) throw new NullPointerException();
+    // 封装节点
+    Node<E> node = new Node<E>(e);
+    final ReentrantLock lock = this.lock;
+    // 这里是lock不是lockInterruptibly
+    lock.lock();
+    try {
+        // 如果队列满返回false
+        while (!linkFirst(node))
+            // 将线程加入 等待添加条件队列
+            notFull.await();
+    } finally {
+        lock.unlock();
+    }
+}
+// 将元素添加到队首，队列满返回false
+private boolean linkFirst(Node<E> node) {
+    // 队列满返回false
+    if (count >= capacity)
+        return false;
+    // 获取first节点
+    Node<E> f = first;
+    // 将当前节点的next指向first
+    node.next = f;
+    // 将node设为first
+    first = node;
+    // 如果last=null，说明当前是第一个加入队列的节点
+    if (last == null)
+        // first = last = Node(prev=null, next=null, item != null)
+        last = node;
+    else
+        // last != null 维护 node和first的prev和next，不处理last
+        f.prev = node;
+    // 队列大小+1
+    ++count;
+    // 唤醒等待获取条件队列中的线程
+    notEmpty.signal();
+    // 返回true
+    return true;
+}
+```
+
+> 1. 将元素添加到队首，如果队列满，`阻塞`等待直到将元素添加到队列中。
+> 2. 当添加节点是队列中的第一个节点时，`first = last = Node(prev = next = null, item != null)`，之后`linkFirst`就只会维护node和fist之间的关系，不会维护last节点。
+
+- putLast
+
+```java
+// 将元素添加到队尾
+public void putLast(E e) throws InterruptedException {
+    // 判断NPE
+    if (e == null) throw new NullPointerException();
+    // 创建节点
+    Node<E> node = new Node<E>(e);
+    final ReentrantLock lock = this.lock;
+    lock.lock();
+    try {
+        // 将元素加入队尾，如果队列满返回false
+        while (!linkLast(node))
+            // 将线程加入 等待添加条件队列
+            notFull.await();
+    } finally {
+        lock.unlock();
+    }
+}
+// 将元素添加到队尾，队列满返回false
+private boolean linkLast(Node<E> node) {
+    // 如果队列满返回false
+    if (count >= capacity)
+        return false;
+    // 获取last节点
+    Node<E> l = last;
+    // 将node的前驱设为last
+    node.prev = l;
+    // 将node设为last
+    last = node;
+    // 同理，说明当前节点第一个加入队列的节点
+    if (first == null)
+        // first = last = node(prev=null, last=null, item!=null)
+        first = node;
+    else
+        // 不是第一个加入队列的节点，维护last和node之间的关系
+        l.next = node;
+    // 将队列数量加1
+    ++count;
+    // 唤醒 等待获取条件队列线程
+    notEmpty.signal();
+    return true;
+}
+```
+
+> 1. 将元素添加到队尾，如果队列满，`阻塞`等待直到将元素添加到队列中。
+> 2. 和`putFirst`同理，第一个加入队列的节点需要特殊处理下，`linkLast`只会维护node和last之间的关系，不会维护first节点。
+
+##### 获取
+
+- takeFirst
+
+```java
+// 获取队首元素
+public E takeFirst() throws InterruptedException {
+    final ReentrantLock lock = this.lock;
+    // 获取独占锁
+    lock.lock();
+    try {
+        E x;
+        // 队列为空返回false，就阻塞等待拿到头元素
+        while ( (x = unlinkFirst()) == null)
+            // 将线程加入 等待获取条件队列
+            notEmpty.await();
+        // 否则返回元素
+        return x;
+    } finally {
+        lock.unlock();
+    }
+}
+// 队列为空返回null，否则返回头节点并处理链表
+private E unlinkFirst() {
+    /// 若first = null，说明队列没有初始化，直接返回null
+    Node<E> f = first;
+    if (f == null)
+        return null;
+    // 获取first的next节点
+    Node<E> n = f.next;
+    // 获取next节点的item
+    E item = f.item;
+    // 将first.item = null
+    f.item = null;
+    // 去掉f的引用，便于GC
+    f.next = f;
+    // 将next节点设为first节点
+    first = n;
+    // 成立条件：1. 队列刚初始化还没有节点进入 2. 节点被清空了。
+    // 两个条件都需要处理下last节点
+    if (n == null)
+        // first = last = null
+        last = null;
+    else
+        // 如果队列中还有其他元素，不处理last，将first.prev=null
+        n.prev = null;
+    // 将队列大小-1
+    --count;
+    // 唤醒等待添加队列中线程
+    notFull.signal();
+    return item;
+}
+```
+
+> 1. takeFirst会获取队首元素，当队列为空时，`阻塞`等待直到队列不为空获取到元素。
+> 2. 获取队首元素的同时，会删除原来的first的节点。如果`删除后队列没有其他节点或队列刚初始化`，都需要处理last节点。否则只需要维护first节点，不用处理last节点。
+
+- takeLast
+
+```java
+public E takeLast() throws InterruptedException {
+    final ReentrantLock lock = this.lock;
+    lock.lock();
+    try {
+        E x;
+        // 队列为空返回null，会加入等待获取条件队列
+        while ( (x = unlinkLast()) == null)
+            notEmpty.await();
+        return x;
+    } finally {
+        lock.unlock();
+    }
+}
+// 队列为空返回null，否则返回last节点
+private E unlinkLast() {
+    // 如果last = null那么说明队列为空（或被清空了），返回null
+    Node<E> l = last;
+    if (l == null)
+        return null;
+    // 获取last的前驱节点
+    Node<E> p = l.prev;
+    // 获取前驱节点的item，并设为null
+    E item = l.item;
+    l.item = null;
+    // 去除last节点引用，便于回收
+    l.prev = l;
+    // 前驱节点设为last
+    last = p;
+    // 和takeFirst一致，处理队列被清空或刚初始化时first节点
+    if (p == null)
+        first = null;
+    else
+        // 不需要处理first节点，维护node和last关系
+        p.next = null;
+    // 队列大小-1
+    --count;
+    // 唤醒 等待添加条件队列线程
+    notFull.signal();
+    return item;
+}
+```
+
+> 1. takeLast会获取队尾元素，当队列为空时，`阻塞`等待直到队列不为空获取到元素。
+> 2. 获取队尾元素的同时，会删除原来的last的节点。如果`删除后队列没有其他节点或队列刚初始化`，都需要处理first节点。否则只需要维护last节点，不用处理first节点。
+
+##### 总结
+
+- 除了内部维护的是`双向链表队列、一把独占锁和两个条件队列`外，其实现原理和`LinkedBlockingQueue`相同。
+- `LinkedBlockingDeque`无论操作队首还是队尾，都要考虑`队列内无节点`的情况。
+- `LinkedBlockingDeque`中非空队列是不存在哨兵节点的，是`直接返回头或尾`，而`LinkedBlockingQueue`返回的是`头节点的next节点`。
+- 因为`一把锁的设计，存在头尾操作都需要竞争锁`的问题，所以`LinkedBlockingDeque`效率要低于`LinkedBlockingQueue`。
+
+---
+
+### Collection
+
+#### CopyOnWriteArrayList
+
+> `CopyOnWrite`思想是计算机程序设计领域的一种优化策略。若有多个调用者同时要求相同的资源，他们会获得`共同的指针`指向相同的资源，直到某个调用者试图修改资源的时候，才会`复制一份副本`给该调用者，但`其他调用者见到的最初资源不改变`，此过程`对其他调用者透明`。
+>
+> `CopyOnWriteArrayList`是ArrayList的线程安全变体，通过`生成新的副本`来实现。
+
+##### 构造
+
+```java
+public class CopyOnWriteArrayList<E>
+    implements List<E>, RandomAccess, Cloneable, java.io.Serializable {
+    
+  	// 内部独占锁
+    final transient ReentrantLock lock = new ReentrantLock();
+	// volatile 修饰的数组，只能getArray和setArray操作
+    private transient volatile Object[] array;
+	// 返回当前数组
+    final Object[] getArray() {
+        return array;
+    }
+	// 设置数组
+    final void setArray(Object[] a) {
+        array = a;
+    }
+	// 构造函数 创建一个空数组
+    public CopyOnWriteArrayList() {
+        setArray(new Object[0]);
+    }
+}
+```
+
+> 底层是通过数组实现，数组使用`volatile`修饰保证了多线程之间的可见性。
+
+##### add
+
+```java
+public boolean add(E e) {
+    // 获取独占锁
+    final ReentrantLock lock = this.lock;
+    lock.lock();
+    try {
+        // 获取当前的数组，此时不会存在其他线程修改了数组
+        // 只是add期间若有其他线程查询，那么查到的是旧的数据
+        Object[] elements = getArray();
+        // 获取数组长度
+        int len = elements.length;
+        // copy数组并将数组扩大1
+        Object[] newElements = Arrays.copyOf(elements, len + 1);
+        // 将元素插入数组的最后
+        newElements[len] = e;
+        // 设置数组到成员变量array中
+        setArray(newElements);
+        return true;
+    } finally {
+        lock.unlock();
+    }
+}
+```
+
+> add操作需要获取独占锁，在执行add操作期间，若有其他线程执行查询操作，那么它获得将会是旧的数据。在add操作之后查询，获得会是最新的数据。
+>
+> 底层调用的时`System.arraycopy`实现数组的拷贝，需要注意：
+>
+> 1. 此方法属于`浅拷贝（复制的是对象的引用）`，如果是数组类型是对象，那么`拷贝后的数组持有的是原数组的引用`。所以`拷贝后的数组修改会影响原数组`。
+> 2. 如果数组类型是基本数据类型（值位于常量池），那么`拷贝只是修改数组中元素的指向`，并不是在常量池中又复制了一份。
+>
+> ![](https://image.leejay.top/image/20200709/BlpbAEFkBDBa.png?imageslim)
+
+##### remove
+
+```java
+// 移除指定index元素
+public E remove(int index) {
+    final ReentrantLock lock = this.lock;
+    // 获取独占锁
+    lock.lock();
+    try {
+        // 获取数组
+        Object[] elements = getArray();
+        // 获取数组length
+        int len = elements.length;
+        // 获取old数组[index]数据
+        E oldValue = get(elements, index);
+        // index + 1 = length 
+        int numMoved = len - index - 1;
+		// numMoved = 0说明移除的是数组的最后一个元素
+        if (numMoved == 0)
+            // 直接将长度减1直接copy即可。
+            setArray(Arrays.copyOf(elements, len - 1));
+        else {
+            // 否则说明移除的是中间的元素
+            // 创建小1的数组
+            Object[] newElements = new Object[len - 1];
+            System.arraycopy(elements, 0, newElements, 0, index);
+            System.arraycopy(elements, index + 1, newElements, index, numMoved);
+            // 设置拷贝后的新数组
+            setArray(newElements);
+        }
+        // 返回被删除的旧值
+        return oldValue;
+    } finally {
+        lock.unlock();
+    }
+}
+```
+
+> remove方法的难度在于`如何移除oldValue并将原有的数据平移到新的数组中`。
+>
+> 我们假设`Object[] objs = [2, 3, 5, 7, 9];length = 5,index<=length-1`：
+>
+> 1. 如果我们移除的是`index = 4`的元素（即最后一个元素），那么直接创建`length = 4`的数组，将数据直接拷贝过去就行，变成`[2,3,5,7]`。
+> 2. 如果我们移除是第三个元素(index = 2)，那么按照源码中的方法：第一次拷贝后，`newElements = [2,3]`，此时`numMoved = 2`，那么执行第二个拷贝之后，`newElements = [2,3,7,9]`。 
+
+##### set
+
+```java
+// 将数组的指定index改成指定值
+public E set(int index, E element) {
+    final ReentrantLock lock = this.lock;
+    // 获取独占锁
+    lock.lock();
+    try {
+        // 获取数组
+        Object[] elements = getArray();
+        // 获取指定index的值
+        E oldValue = get(elements, index);
+		// 判断新旧值是否相同，相同就不需要更改
+        if (oldValue != element) {
+            // 计算数组长度
+            int len = elements.length;
+            // 创建新数组
+            Object[] newElements = Arrays.copyOf(elements, len);
+            // 将数组的指定indexiu该
+            newElements[index] = element;
+            // 设置新数组
+            setArray(newElements);
+        } else {
+            // 并非完全禁止操作；确保可变的写语义
+            setArray(elements);
+        }
+        return oldValue;
+    } finally {
+        lock.unlock();
+    }
+}
+```
+
+> 基于`CopyOnWrite`原理，set方法也需要重新copy一份数组。
+
+##### get
+
+```java
+// 获取某个index元素
+public E get(int index) {
+    // get的数据有可能不是最新的，因为读写不互斥
+    // 此时一个线程已经复制了数据，还没有setArray，get到的就不是最新的
+    return get(getArray(), index);
+}
+// 就是返回数组的index的数据
+private E get(Object[] a, int index) {
+    return (E) a[index];
+}
+```
+
+> get方法能够保证每次获取到的数据都是`当时最新`的数据（基于volatile）。
+
+##### 总结
+
+- `CopyOnWriteArrayList`适用于`读多写少`的并发场景，它允许`null且可以重复`。
+- `CopyOnWriteArrayList`添加元素时建议使用`批量添加`，因为每次添加都要复制。
+- `CopyOnWriteArrayList`的是通过`写时数组copy`来实现，在写操作的时候，内存中会同时具有两个对象的内存，如果这个数组对象过大，会导致`内存占用`问题。
+
+- `CopyOnWriteArrayList`只能保证`数据的最终一致性`，不保证数据实时一致性（读写不互斥，有线程修改数据已经复制了副本，还未执行setArray时，你读到的就是旧数据）。
+
+> 如果需要使用不重复的`CopyOnWrite`框架，推荐`CopyOnWriteArraySet`。它能够实现不重复，核心原理就是添加的时候通过`addIfAbsent`判断元素是否已存在。
+
+#### ConcurrentLinkedQueue
+
+##### 特性
+
+- 基于链表的无界线程安全队列。
+- 队列顺序是`FIFO`先进先出的顺序。队首是插入最久的元素，队尾是最新的元素。
+- 使用场景：`许多线程将共享对一个公共集合的访问，不支持null`。
+- 内部的并发操作通过`自旋 + CAS`实现。与`LinkedBlockingQueue`独占锁不同。
+
+##### 构造
+
+```java
+public class ConcurrentLinkedQueue<E> extends AbstractQueue<E>
+        implements Queue<E>, java.io.Serializable {
+    // head头节点
+    private transient volatile Node<E> head;
+	// tail尾节点
+    private transient volatile Node<E> tail;
+	// 不用传递初始容量
+    public ConcurrentLinkedQueue() {
+        // 初始化head和tail，哨兵节点
+        head = tail = new Node<E>(null);
+    }
+    // 私有静态内部类，用于构成链表的节点（单向链表）
+    // 核心是通过CAS来实现并发操作
+    private static class Node<E> {
+        volatile E item;
+        // 标记next节点 volatile修饰的
+        volatile Node<E> next;
+		// 构造
+        Node(E item) {
+            // CAS添加item
+            UNSAFE.putObject(this, itemOffset, item);
+        }
+		// CAS修改item（把cmp设置成val）
+        boolean casItem(E cmp, E val) {
+            return UNSAFE.
+                compareAndSwapObject(this, itemOffset, cmp, val);
+        }
+		// CAS设置next指针
+        void lazySetNext(Node<E> val) {
+            UNSAFE.putOrderedObject(this, nextOffset, val);
+        }
+		// CAS修改next节点
+        boolean casNext(Node<E> cmp, Node<E> val) {
+            return UNSAFE
+                .compareAndSwapObject(this, nextOffset, cmp, val);
+        }
+        private static final sun.misc.Unsafe UNSAFE;
+        // Node节点中item偏移量
+        private static final long itemOffset;
+        // Node节点中next的偏移量
+        private static final long nextOffset;
+
+        static {
+            try {
+                UNSAFE = sun.misc.Unsafe.getUnsafe();
+                Class<?> k = Node.class;
+                itemOffset = UNSAFE.objectFieldOffset
+                    (k.getDeclaredField("item"));
+                nextOffset = UNSAFE.objectFieldOffset
+                    (k.getDeclaredField("next"));
+            } catch (Exception e) {
+                throw new Error(e);
+            }
+        }
+    }
+}
+```
+
+> 1. Node是私有静态内部类，其中定义了`item和next的CAS方法`。
+> 2. 因为不是阻塞队列，所以`不存在容量字段`，也`不需要指定大小`。
+
+##### 提示
+
+> 如果使用的是idea，会出现`head莫名奇妙被修改，节点引用指向自己的问题`。
+>
+> 解决方案：https://blog.csdn.net/AUBREY_CR7/article/details/106331490
+
+##### offer
+
+```java
+// 添加节点到队列中
+public boolean offer(E e) {
+    // 老一套，判断是否为空，为空抛出NPE
+    checkNotNull(e);
+    // 初始化节点
+    final Node<E> newNode = new Node<E>(e);
+	// 自旋从队尾开始,这里只有初始化条件，没有循环结束条件
+    for (Node<E> t = tail, p = t;;) {
+        // p被认为是真正的尾节点,获取p.next节点
+        // 因为此时有可能有其他线程成为tail
+        Node<E> q = p.next;
+        // q = null 说明此刻p就是tail尾节点
+        if (q == null) {
+            // CAS将newNode设为p的next节点，失败就继续自旋
+            if (p.casNext(null, newNode)) {
+                // p = t = tail = Node(next = newNode)
+                if (p != t)
+                    // CAS设置tail尾节点，即使失败了，
+                    casTail(t, newNode);
+                return true;
+            }
+        }
+        else if (p == q)
+            // 如果tail此时被其他线程改变了，那么p = t成立
+            // 没改变 t = head
+            p = (t != (t = tail)) ? t : head;
+        else
+            // 此行代码用于找到真正的尾节点，赋予p，
+            // 因为tail更新不及时，每添加两个才会更新tail
+            p = (p != t && t != (t = tail)) ? t : q;
+    }
+}
+// 测试代码
+class Test {
+    private static ConcurrentLinkedQueue<Integer> QUEUE = 
+        						new ConcurrentLinkedQueue<>();
+    public static void main(String[] args) {
+        QUEUE.offer(11);
+        QUEUE.offer(22);
+        QUEUE.offer(33);
+    }
+}
+```
+
+>推论：`每插入两个节点，tail指针才会移动，指向第二个插入的节点`。
+>
+>1. `t表示刚进入代码时的尾节点，p用来表示队列真正的尾节点`，当`p.next = null`成立时说明p此时指向真正的尾节点，如果不成立说明p此时不是真正的尾节点，需要查找真正的尾节点并将它赋予p，保证每次新增的节点都在队尾。
+>2. `p = (p != t && t != (t = tail)) ? t : q;`，针对这个代码，我们假设一个场景，队列中已经有第一个节点了（此时tail指针还没修改），此时线程A和线程B同时进入该段自旋代码准备执行：
+>   1. 线程A判断`p.next != null`，执行else中代码，此时`p != t`不成立，所以`p = q`后继续循环执行，线程A继续判断`p.next = q = null`成立，所以执行`p.casNext`，此时线程A的值加入了队列，此时`p != t`成立，准备执行casTail。
+>   2. 此时`切换为线程B`，线程B判断`p.next != null`，执行else中`p != t`不成立，所以`p = q`后继续循环，因为线程A的值加入了队列，所以`q = p.next != null`，执行else中代码，此时`p != t`成立，准备执行`t != (t = tail)`。
+>   3. 切换回线程A，`线程A执行casTai，tail指针被修改`，线程A返回true退出循环，切换到线程B，判断`t != (t = tail)`成立，此时`p = t = 更改后的tail`，继续循环执行`p.next = q = null`成立，执行casNext，将线程A的值也加入队列中。
+>3. `p == q`需要结合`poll`方法去解析(一些线程offer，一些poll)，当它成立的时候说明`p.next = p = q`，说明这种节点是哨兵节点，表示为需要删除或者过滤的节点。
+
+##### offer执行流程
+
+![](https://image.leejay.top/image/20200710/XWBJx3hhhzX3.jpg?imageslim)
+
+##### poll
+
+```java
+// 删除链表的头节点并返回该节点的item
+public E poll() {
+    restartFromHead:
+    // 自旋
+    for (;;) {
+        // head = h = p
+        for (Node<E> h = head, p = h, q;;) {
+            E item = p.item;
+			// 如果item不为null，那么CAS修改为null
+            if (item != null && p.casItem(item, null)) {
+                // CAS成功后会执行到这里
+                // head也是每两个节点更新一次
+                if (p != h) 
+                    // p != h 说明此时需要更新head标识
+                    updateHead(h, ((q = p.next) != null) ? q : p);
+                // 直接返回item
+                return item;
+            }
+            // 如果p.item = null 且 p.next= null
+            else if ((q = p.next) == null) {
+                // 更新head节点
+                updateHead(h, p);
+                return null;
+            }
+            else if (p == q)
+                continue restartFromHead;
+            else
+                p = q;
+        }
+    }
+}
+
+final void updateHead(Node<E> h, Node<E> p) {
+    // 如果要更新的节点和当前节点不同，那么尝试更新head头节点，注意h节点不会变
+    if (h != p && casHead(h, p))
+        // 将原head的节点next指针指向自己，便于GC
+        h.lazySetNext(h);
+}
+```
+
+> 推论：`每移除两个节点，head指针会移动一次`。
+>
+> 1. 和offer方法一样，`h为刚进入代码的头节点，p节点用来表示为真正要删除的头节点`。
+>
+> 2. 只有当当前head节点的`item!=null`时才会尝试去CAS修改，若`item = null`的节点会通过`q = p.next`去查找。找到后执行`updateHead`，移除h节点并设置新的head节点。
+>
+> 3. `p == q`何时成立：线程A和线程B同时获取队列中的元素，假设线程B移除了节点并将其设为`哨兵节点（h.next = h）`，此时线程A判断`item != null`不成立，继续判断`p == q`成立。
+>
+> 4. 再结合offer方法中何时`p == q`：
+>
+>    1. `此时队列中head=tail(item=null, next=node1)，node1=(item!=null,next=null)`，此时线程A尝试offer数据，线程B尝试poll数据，线程A先进入循环，切换为线程B，此时`h = head = p`，继续执行`p.item = null`，判断`q = p.next != null`且`p != q`，所以执行else：`p = q`，继续循环，`p.item != null`，尝试CAS修改，且`p != h`，所以执行`updateHead将h改为哨兵节点`。
+>    2. 此时线程切换回A，线程执行`q = p.next（此时p已经是哨兵节点了）`判断`q != null`，继续判断`p = q`成立，执行`p = (t != (t = tail)) ? t : head;`，此时的`p = head`，继续从头节点开始循环插入尾节点。至此两个线程都执行完毕。
+>
+>    ![](https://image.leejay.top/image/20200710/qsxlf6aucyH7.png?imageslim)
+
+##### poll执行流程
+
+![](https://image.leejay.top/image/20200710/8Pn7oKJw2R07.jpg?imageslim)
+
+##### 总结
+
+- `ConcurrentlinkedQueue`是`非阻塞队列`，底层使用`自旋和CAS`来实现，`FIFO`且不允许`null`值。
+- `ConcurrentlinkedQueue`元素入队和出队操作都是线程安全的，但`遍历不是的线程安全的`，并且在判断元素是否为空的时候建议使用`isEmpty`而不是`sze == 0（遍历队列）`
+- `ConcurrentlinkedQueue`中的`head和tail`节点都是延迟更新，采用的是`HOPS`策略，如果每次节点入队都更新头尾节点，确实代码更好理解，当时执行大量CAS操作对性能也是损耗，`采用大量读的操作来替代每次节点入队都写的操作，以此提升性能。`
+- 相比`LinkedBlockingQueue`阻塞队列，`ConcurrentlinkedQueue`非阻塞队列的并发性能更好些。当时具体使用场景选择不同的
+
+
+
+#### ConcurrentHashMap
 
