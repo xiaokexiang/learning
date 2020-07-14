@@ -5377,7 +5377,7 @@ public V get(Object key) {
 
 ##### 实现原理
 
-所谓线程池实现原理：`调用方不断向线程池中添加任务，线程池中有一组线程，不断的从队列中取任务`。典型的`生产者和消费者模型`。基于这样的原理，我们实现线程池需要使用到`阻塞队列`，保证无任务时轮询带来的资源消耗。
+所谓线程池实现原理：`调用方不断向线程池中添加任务，线程池中有一组线程，不断的从队列中取任务`。典型的`生产者和消费者模型`。基于这样的原理，我们实现线程池需要使用到`阻塞队列`，避免无任务时轮询带来的资源消耗。
 
 ##### 线程池类继承体系
 
@@ -5690,7 +5690,7 @@ final void tryTerminate() {
 > 2. 如果是`SHUTDOWN或STOP态`但`workCount!=0`，那么会中断空闲的线程，保证关机的信号传播。
 > 3. `tryTerminate`方法并不会强制关机，它只是在正确的时间将线程池状态改为`TIDYING`后执行`terminated`钩子函数，最后再唤醒执行了`awaitTermination`的线程。
 > 4. 只有`tryTerminate`方法才会将`ctl`修改为`TIDYING`或`TERMINATED`，且`自旋+CAS`直到成功。
-> 5. 我们需要在`任何可能终止的情况后`调用`tryTerminate`方法。
+> 5. 我们需要在`任何可能终止线程池的情况后`调用`tryTerminate`方法。
 
 ###### await
 
@@ -5926,7 +5926,7 @@ public void execute(Runnable command) {
 public boolean remove(Runnable task) {
     // 从队列中移除任务
     boolean removed = workQueue.remove(task);
-    // 之前分析tryTerminate时说过：在任何有可能
+    // 之前分析tryTerminate时说过：任何可能终止线程池的情况后调用tryTerminate
     tryTerminate();
     return removed;
 }
