@@ -6049,7 +6049,7 @@ private boolean addWorker(Runnable firstTask, boolean core) {
         // workerStarted = false，那么workerAdded肯定是false
         // 说明 t=null | t!=null但(rs > shutdown or(rs=shutdown但task!=null)）
         if (! workerStarted)
-            // 
+            // 任务回滚
             addWorkerFailed(w);
     }
     return workerStarted;
@@ -6140,7 +6140,7 @@ final void runWorker(Worker w) {
             // 1. shutDown方法中调用的中断方法会通过tryLock判断线程是否空闲
             // 2. 避免worker线程被中断，worker实现了独占锁大部分功能，不及时响应中断
             w.lock();
-            // 如果线程池正在终止，那么中断当前线程，如果不是，那么不然线程被中断
+            // 如果线程池正在终止，那么中断当前线程，如果不是，那么不让线程被中断
             if ((runStateAtLeast(ctl.get(), STOP) ||
                  (Thread.interrupted() &&
                   runStateAtLeast(ctl.get(), STOP))) &&
@@ -6239,8 +6239,8 @@ private Runnable getTask() {
 
 > 1. 第一个判断：如果线程池状态变成`SHUTDOWN或队列已空`，那么将`workerCount减1并返回null`。
 > 2. `allowCoreThreadTimeOut`参数表明`corePoolSize指定数量的核心线程能否超时，默认为false`。
-> 3. 第二个判断：如果`①wc超过maxPoolSize`或`(wc>corePoolSize且上次pool超时)`，那么继续判断②`wc>1或阻塞队列为空`，如果两者都成立，那么会减wc减1，多次循环后可能`wc = 1`。
-> 4. 根据`wc>corePoolSize`来决定调用的是`poll(time)还是take()`，前者阻塞`keepAliveTime`，后者`一直阻塞直到获取了任务`。
+> 3. 第二个判断：如果 ①`wc超过maxPoolSize`或`(wc > corePoolSize 且 上次poll超时)`，那么继续判断。 ②`wc > 1或 阻塞队列为空`，若两者都成立，那么会将wc减1，多次循环后可能`wc=1`。
+> 4. 根据`wc > corePoolSize`返回`true/false`来决定调用的是`poll(time)/take()`，前者阻塞`keepAliveTime`，后者`一直阻塞直到获取了任务`。最终一定会有`小于等于corePoolSize数量的线程`一直在take处阻塞等待任务。
 > 5. 如果`获取的任务!=null`则返回，否则设置`timeOut=true`。发生异常则设置`timeOut=false`。
 
 ###### processWorkerExit
@@ -6281,7 +6281,7 @@ private void processWorkerExit(Worker w, boolean completedAbruptly) {
                 return; // replacement not needed
         }
         // 如果是异常退出，直接addWorker
-        // 如果workerCount< min，增加一个no task 的worker
+        // 如果workerCount< min，增加一个null task的worker
         addWorker(null, false);
     }
 }
@@ -6289,21 +6289,49 @@ private void processWorkerExit(Worker w, boolean completedAbruptly) {
 
 > 何时调用此方法处理worker的退出？
 >
->    ① 执行`runWorker`方法时发生了异常。
+> ① 执行`runWorker`方法时发生了异常。
 >
->    ② `getTask方法返回null`时会调用。
+> ② `getTask方法返回null`时会调用。
 >
 > 1. 如果`completedAbruptly=true`说明`runWorker`异常退出，将`workerCount-1`.
+>
 > 2. 获取独占锁，将worker执行的任务数传递给线程池`completedTaskCount`并移除该worker。
-> 3. 如果`rs<STOP`且当前worker正常退出的，如果`allowCoreThreadTimeOut=true`且`队列不为空`，那么至少保留一个worker。如果`allowCoreThreadTimeOut=false`，那么仅在`workerCount < corePoolSize`时增加一个worker。如果当前worker非正常退出的，直接添加一个worker。
+>
+> 3. 如果`rs < STOP`时：
+>
+>    ① 当前worker正常退出的，如果`allowCoreThreadTimeOut=true`且`队列不为空`，那么至少保留一个worker。如果`allowCoreThreadTimeOut=false`，那么仅在`workerCount < corePoolSize`时增加一个worker。
+>
+>    ② 如果当前worker非正常退出的，直接添加一个worker。
 
 ##### 线程池问题汇总
 
 - 为什么Worker类选择继承了AQS而不是直接采用ReentrentLock？
-- 为什么runWorker方法需要获取独占锁？
-- 为什么runWorker方法中会先调用unlock方法？
 
-Worker对象在初始化的时候会将`state = -1`，防止worker在刚初始化后`还没有执行任务就被中断`。因为`shutDown和shutDownNow`方法中都有中断线程的方法，只是逻辑不同而已，前者是通过`tryLock`判断当前worker是否空闲，后者是通过`state>=0将已初始化还未执行`的worker排除在外。
+> Doug lea希望实现的是`非可重入的互斥锁`，不希望worker在调用类似`setCorePoolSize`之类的线程池控制方法时能够重新获取该锁。
 
-将`state=0`后，一方面表示`当前线程可以被后续shutDownNow中断操作所中断`，另一方面`让后续调用shutDown操作的线程通过tryLock判断中断空闲线程`。
+- 为什么初始化Worker对象时会将state设为-1？
+
+> Worker对象在初始化的时候会将`state = -1`，`防止worker在刚初始化后还没有执行任务就被中断`。因为`shutDown和shutDownNow`方法中都有中断线程的方法，只是逻辑不同而已，前者是通过`tryLock`来中断空闲线程，后者是通过`state >= 0将已初始化还未执行`的worker排除在外。
+
+- 为什么runWorker方法中会先调用unlock再调用lock方法？
+
+> `worker.unlock`方法的核心在于`tryRelease`方法，该方法设置`state = 0`后，lock方法才有可能执行成功，`否则永远无法获取锁`。除此之外还有控制中断的作用：
+>
+> 1. `当前worker可以被后续shutDownNow中断操作所中断`。
+> 2. `让后续调用shutDown操作的线程通过tryLock判断worker是否空闲`。
+>
+> ```java
+> protected boolean tryAcquire(int unused) {
+>     // 如果是state=-1，CAS永远不会成功
+>     if (compareAndSetState(0, 1)) {
+>         setExclusiveOwnerThread(Thread.currentThread());
+>         return true;
+>     }
+>     return false;
+> }
+> ```
+
+- 线程池为何能够持有线程不释放，在有任务的时候立即执行？
+
+> 核心在于`getTask`方法中，`核心线程`会执行`take()`方法直到任务到来，`非核心线程`会执行`poll()阻塞keepAliveTime后超时`，`getTask`返回null，最终调用`processWorkerExit`让当前worker推出。
 

@@ -24,10 +24,10 @@ public class ThreadPoolSingleton implements Serializable {
     private static class Holder {
         private static final ThreadPoolExecutor THREAD_POOL_EXECUTOR = new ThreadPoolExecutor(
                 2,
-                32,
-                60,
+                4,
+                10,
                 TimeUnit.SECONDS,
-                new ArrayBlockingQueue<>(10),
+                new ArrayBlockingQueue<>(2),
                 new CustomizableThreadFactory("Thread-Pool-"),
                 new ThreadPoolExecutor.CallerRunsPolicy());
     }
