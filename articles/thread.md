@@ -6305,13 +6305,17 @@ private void processWorkerExit(Worker w, boolean completedAbruptly) {
 
 ##### 线程池问题汇总
 
-- 为什么Worker类选择继承了AQS而不是直接采用ReentrentLock？
+- 为什么Worker类选择继承了AQS而不是直接使用ThreadPoolExecutor的ReentrentLock？
 
-> Doug lea希望实现的是`非可重入的互斥锁`，不希望worker在调用类似`setCorePoolSize`之类的线程池控制方法时能够重新获取该锁。
+> 源码注释：Doug lea希望实现的是`非可重入的互斥锁`，不希望worker在调用类似`setCorePoolSize`之类的线程池控制方法时能够重新获取该锁。
+>
+> 因为`需要符合一定的条件才能中断worker线程`，这个条件是通过设置`state=-1`来实现。而ThreadPoolExecutor中的`ReentrantLock`不能实现这个需求，所以需要额外继承AQS。
+>
+> `setCorePoolSize-> interruptIdleWorkers()-> interruptIdleWorkers(false)-> tryLock()`
 
 - 为什么初始化Worker对象时会将state设为-1？
 
-> Worker对象在初始化的时候会将`state = -1`，`防止worker在刚初始化后还没有执行任务就被中断`。因为`shutDown和shutDownNow`方法中都有中断线程的方法，只是逻辑不同而已，前者是通过`tryLock`来中断空闲线程，后者是通过`state >= 0将已初始化还未执行`的worker排除在外。
+> Worker对象在初始化的时候会将`state = -1`，`防止worker在刚初始化后还没有执行任务就被中断`。因为`shutDown和shutDownNow`方法中都有中断线程的方法，只是逻辑不同而已，前者是通过`tryLock`来中断空闲线程(`只有state=0时才会成功`)，后者是通过`state >= 0将已初始化还未执行`的worker排除在外。
 
 - 为什么runWorker方法中会先调用unlock再调用lock方法？
 
