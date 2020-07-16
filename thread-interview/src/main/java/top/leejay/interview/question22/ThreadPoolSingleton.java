@@ -29,7 +29,7 @@ public class ThreadPoolSingleton implements Serializable {
                 TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(2),
                 new CustomizableThreadFactory("Thread-Pool-"),
-                new ThreadPoolExecutor.CallerRunsPolicy());
+                new ThreadPoolExecutor.AbortPolicy());
     }
 
     public Object readResolve() {
