@@ -9,7 +9,7 @@ import java.util.Arrays;
 public class NumberQueue {
     private int[] array;
     private int head;// head的index
-    private int tail;// tail的index
+    private int tail;// tail的index,tail所在位置永远没有值，也就是队列最多cap-1个数
 
     public NumberQueue(int size) {
         this.array = new int[size];
