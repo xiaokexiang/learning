@@ -1,7 +1,6 @@
-package top.leejay.learning.service;
+package top.leejay.learning.structure;
 
 import com.google.common.collect.Lists;
-import top.leejay.learning.entity.TreeNode;
 
 import java.util.LinkedList;
 import java.util.List;

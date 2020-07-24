@@ -1,4 +1,4 @@
-package top.leejay.learning.entity;
+package top.leejay.learning.structure;
 
 import lombok.Data;
 

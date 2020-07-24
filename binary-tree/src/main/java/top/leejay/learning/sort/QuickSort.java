@@ -1,23 +1,27 @@
 package top.leejay.learning.sort;
 
+
+import java.util.Arrays;
+
 /**
  * 快速排序，时间复杂度：O(nlog^n) 最差 O(n^2)
+ * 采用分治的原理
  */
-public class QuickSort {
-    int sum(int[] array) {
-        if (array.length < 2)
-            return array[0];
-        else {
-            int size = array.length - 1;
-            int[] newArray = new int[size];
-            System.arraycopy(array, 1, newArray, 0, size);
-            return array[0] + sum(newArray);
-        }
+public class QuickSort extends Sort {
+
+    public QuickSort(int[] array) {
+        super(array);
     }
 
+    @Override
+    protected void sort() {
+    }
+
+
     public static void main(String[] args) {
-        QuickSort quickSort = new QuickSort();
-        int sum = quickSort.sum(new int[]{1, 2, 3, 4, 5});
-        System.out.println(sum);
+        int[] i = new int[]{3, 4, 1, 2, 6, 8, 7, 10, 9};
+        QuickSort quickSort = new QuickSort(i);
+        quickSort.sort();
+        System.out.println(Arrays.toString(quickSort.array));
     }
 }

@@ -1,4 +1,4 @@
-package top.leejay.learning.algorithm;
+package top.leejay.learning.structure;
 
 /**
  * stack可以由数组或链表实现

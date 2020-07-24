@@ -1,4 +1,4 @@
-package top.leejay.learning.algorithm;
+package top.leejay.learning.structure;
 
 import java.util.Arrays;
 
