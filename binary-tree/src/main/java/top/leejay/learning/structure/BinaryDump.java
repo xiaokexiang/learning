@@ -7,15 +7,15 @@ import java.util.Arrays;
  */
 public class BinaryDump {
 
-    private int[] array;
     private boolean fast;
+    private int[] array;
 
     public BinaryDump(int[] array, boolean fast) {
         this.fast = fast;
         if (fast) {
-            build(array);
-        } else {
             buildFast(array);
+        } else {
+            build(array);
         }
     }
 
@@ -26,6 +26,9 @@ public class BinaryDump {
      * @return parentIndex
      */
     int prev(int c) {
+        if (c <= 0) {
+            return -1;
+        }
         return c % 2 != 0 ? (c - 1) >>> 1 : (c - 2) >>> 1;
     }
 
@@ -88,12 +91,12 @@ public class BinaryDump {
     public void buildFast(int[] array) {
         int size;
         // 从非叶子节点开始遍历，从后往前遍历
-        for (int i = (size = array.length >>> 1); i >= 0; i--) {
+        for (int i = (size = array.length >>> 1) - 1; i >= 0; i--) {
             int k = i;
             // 遍历查找当前index的左右节点是否都小于当前节点
             // 退出条件：右节点index超过数组大小
             while (k < size) {
-                int le = k << 1 + 1;
+                int le = (k << 1) + 1;
                 int rt = le + 1;
                 int min = Math.min(array[le], array[rt]);
                 // 如果当前节点大于子节点中的最小节点，那么需要移位
@@ -127,21 +130,17 @@ public class BinaryDump {
     }
 
     /**
-     * 将数组中指定index的元素移除
-     * 将最后一个元素移到被删除index位置，再重新build
+     * 移除队首元素，将队尾元素移到队首，再重新构建
      */
-    int[] delete(int index) {
+    int delete() {
         int size = array.length;
+        int first = array[0];
         int[] arr = new int[size - 1];
-        if (index == size - 1) {
-            System.arraycopy(array, 0, arr, 0, size - 1);
-            return arr;
-        }
-        int p = index;
-        array[p] = array[size - 1];
+        // 将队尾移到队首
+        array[0] = array[size - 1];
         System.arraycopy(array, 0, arr, 0, size - 1);
-        this.array = arr;
-        return fast ? siftDown(index) : build(arr);
+        this.array = fast ? siftDown(arr) : build(arr);
+        return first;
     }
 
     /**
@@ -171,33 +170,36 @@ public class BinaryDump {
      * 同样的从上往下替换，最多处理O(树高)次 -> O(logn)
      * 时间复杂度： O(logn)
      *
-     * @param index 被删除的元素index
+     * @param array array
      * @return 删除后的最小二叉堆
      */
-    private int[] siftDown(int index) {
-        int k = index;
+    private int[] siftDown(int[] array) {
+        int k = 0;
         int size = array.length;
         int le, rt;
         // 只要当前节点的左子节点小于size就继续循环
-        while ((le = k << 1 + 1) < size) {
+        while ((le = (k << 1) + 1) < size) {
             // 存在左节点没越界，但右节点越界情况
             // 此时当前节点只有一个左节点，需要当前节点和左节点比较
             if ((rt = le + 1) >= size && array[k] > array[le]) {
                 int temp = array[le];
                 array[le] = array[k];
                 array[k] = temp;
+                k = le;
             } else {
                 // 此时说明左右节点都存在
                 int min = Math.min(array[le], array[rt]);
                 int temp = array[k];
                 array[k] = min;
+                // 注意这里的index要和左右子节点较小的交换
                 if (array[le] > array[rt]) {
                     array[rt] = temp;
+                    k = rt;
                 } else {
                     array[le] = temp;
+                    k = le;
                 }
             }
-            k = le;
         }
         return array;
     }
@@ -205,12 +207,16 @@ public class BinaryDump {
 
     public static void main(String[] args) {
         int[] i = new int[]{3, 5, 2, 4, 9, 10, 7};
-        BinaryDump binaryDump = new BinaryDump(i, true);
+        BinaryDump binaryDump = new BinaryDump(i, false);
+        System.out.println(Arrays.toString(binaryDump.array));
         System.out.println(Arrays.toString(binaryDump.add(6)));
         System.out.println(Arrays.toString(binaryDump.add(11)));
         System.out.println(Arrays.toString(binaryDump.add(8)));
-        System.out.println(Arrays.toString(binaryDump.delete(3)));
-        System.out.println(Arrays.toString(binaryDump.delete(8)));
-        System.out.println(Arrays.toString(binaryDump.delete(4)));
+        System.out.println(binaryDump.delete());
+        System.out.println(Arrays.toString(binaryDump.array));
+        System.out.println(binaryDump.delete());
+        System.out.println(Arrays.toString(binaryDump.array));
+        System.out.println(binaryDump.delete());
+        System.out.println(Arrays.toString(binaryDump.array));
     }
 }
