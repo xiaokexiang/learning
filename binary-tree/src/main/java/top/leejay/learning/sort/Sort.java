@@ -3,7 +3,6 @@ package top.leejay.learning.sort;
 
 /**
  * @author xiaokexiang
- * @description
  */
 public abstract class Sort {
     protected int[] array;
