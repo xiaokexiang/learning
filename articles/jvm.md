@@ -29,11 +29,59 @@ Thread Local Allocation Buffer（本地线程缓冲区），原有的虚拟机�
 
 `JDK1.8`起，方法区改名为`元数据区（MetaSpace）`，是`线程共享`的区域，是堆的一个`逻辑部分`，用于存储`JVM加载的类型信息、常量、静态变量及即时编译后的方法代码`等数据。会抛出`OOM`异常。
 
-#### 运行时常量池
+#### 常量池分类
 
-运行时常量池是方法区的一部分。Class文件除了有`类的版本、字段、方法、接口`等描述信息外，还包含`常量池表（Constant Pool Table）`，用于存放编译期生成的`各中字面量和符号引用`，这部分数据会在`类加载`后被放入常量池。
+- Class文件中的常量池
 
-> `运行时常量池`相比`常量池表`更具动态性，但并非编译期生成的Class类常量池内容才能进入`方法区运行时常量池`，运行期间也可以进入，例如`String类的intern()方法`就可以实现。
+主要存放`字面量 & 符号引用`。前者主要是`文本字符串、八种基本数据类型、final修饰的常量`等，后者包含：`类和接口的全限定名、字段的名称和描述符、方法的名称和描述符`。在类被加载后会存放到`运行时常量池`中。
+
+- 运行时常量池
+
+属于`元数据区`中的一部分，类在被JVM加载后，类的版本、字段、方法和常量池等都会进入该区域。JVM会为`每个加载的class维护一个运行时常量池`，同时其中存储的是`引用`，实际对象还在`堆中`。日常我们所称的常量池就是运行时常量池。
+
+- 全局字符串常量池
+
+存在于`native memory`中，运行时存在的记录`interned string`的全局表`StringTabel`。其中存放的是`String实例的引用`，实际的`String对象`仍存在于堆。
+
+> `String.intern()`：如果`字符串常量池`已存在该字符串引用，那么就返回已存在的字符串的引用。若没有就将引用保存到`字符串常量池`并返回引用。
+
+#### 字符串在常量池中的转换流程
+
+1. 首先`编译期`会将字面量、符号引用等放入Class文件的常量池中。
+
+2. 在JVM`类加载`的过程中，除了字面量，类的字段、方法等信息都会加载到当前类`运行时常量池`。此时运行时常量池中存放的是`CONSTANT-UnresolvedString`，表明尚未`resolve`，只有在解析后存放的是`CONSTANT_String`，内容是实际的`String对象的引用`，和`字符串常量池的引用`一致。
+
+3. 因为JVM类加载过程中的`解析(resolve)阶段`是可以懒执行的，所以只有当执行`ldc指令`时，通过存放在`运行时常量池`的索引去`字符串常量池`查找是否存在对应的String实例，如果存在就直接返回该引用，如果不存在就先在`堆中创建对应的String对象`，并将引用记录在`字符串常量池`中，再返回该引用。
+
+   > `ldc指令`：将`int、float或String类型的常量值从常量池推送至栈顶`。
+   >
+   > 资料来源：https://www.zhihu.com/question/55994121/answer/408891707
+
+#### 实战解析
+
+```java
+// javac -encoding utf-8 StringTest.java
+// javap -v StringTest.class
+public class StringTest {
+    public static void main(String[] args) {
+        String s1 = "hello";
+        String s2 = new String("he") + new String("llo");
+        String s3 = s2.intern();
+        // s1 == s2?
+        // s1 == s3?
+    }
+}
+```
+
+![](https://image.leejay.top/image/20200812/wbM7hA4czBRz.png?imageslim)
+
+> 上图是`javap`之后的汇编指令，我们可以看出三个字符串常量，调用了三次`ldc`指令。
+>
+> 结合上段解释的`ldc`指令，`"hello"、"he"、"llo"的引用`在解析阶段都进入了`字符串常量池`。而这三个字符串的`String实例`仍存在堆中。并且在`resolve阶段`后，元数据区的`运行时常量池也会存放三个字符串的引用`，和`字符串常量池`一致。
+>
+> 因为`new String() + new String()`实际上调用了`StringBuilder`创建了一个新对象。所以`s1 == s2`不成立。
+>
+> `s2.inter()`，此时`字符串常量池`中已存在`equal "hello"`的字符串引用，即s1的引用，所以`s1 == s3`成立。
 
 ---
 
@@ -179,7 +227,7 @@ public static void main(String[] args) {
 }
 ```
 
-> 需要注意在JDK7及以上版本中不会抛出之前的`PemGen space`异常，因为常量池被移到了`堆中`，如果我们限制堆的大小，会抛出`Java heap space`异常。
+> 需要注意在JDK7及以上版本中不会抛出之前的`PemGen space`异常，因为字符串常量池被移到了`堆中`，如果我们限制堆的大小，会抛出`Java heap space`异常。
 
 - 元数据OOM
 
@@ -222,20 +270,4 @@ public static void main(String[] args) throws IllegalAccessException {
 > 直接内存由：`-XX：MaxDirectMemorySize`指定，如果不指定则和`-Xmx`一致。
 
 ---
-
-### 面试题
-
-```java
-String s1 = "hello";
-String s2 = new String("hello");
-System.out.println(s1.equals(s2));// true
-System.out.println(s1 == s2);// false
-System.out.println(s1 == s2.intern());// true
-```
-
-> `String s1 = "hello"`：JVM编译期会去常量池中寻找是否存在`"hello"`这个字符串，如果存在就在`栈中`直接开辟空间`存放"hello"在常量池中的地址`。如果不存在就在常量池中开辟空间存放`"hello"`。
->
-> `String s2 = new String("hello")`：JVM编译期先去常量池寻找是否存在`"hello"`，如果不存在会在常量池中开辟空间存放`"hello"`。在运行期间，通过`new String("hello")`将常量池中的`"hello"`复制到`堆中`，相应的在栈中开辟空间存放该`对象的地址值`。
->
-> `String.intern()`会将`"hello"`添加到常量池，并返回该`常量在常量池中的引用`，如果已存在该常量，那么会直接返回已存在常量的地址值。
 
