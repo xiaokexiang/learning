@@ -5,12 +5,10 @@ package top.leejay.jvm.oom;
  */
 public class StringTest {
     public static void main(String[] args) {
-        String s4 = "hello";
-        String s5 = s4.intern();
-        String s6 = new String("12");
-        String s7 = s6.intern();
-        System.out.println(s4 == s5);
-        System.out.println(s6 == s7);
+        String s1 = "hello";
+        System.out.println(s1 == s1.intern());// true
+        String s2 = new String("hello");
+        System.out.println(s2 == s2.intern());// false
     }
     // 编译阶段 hello he llo 都会进入class类常量池
     // 类加载节点 hello he llo 都会进入运行时常量池
