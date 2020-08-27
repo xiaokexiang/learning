@@ -76,7 +76,7 @@ $$
 # 系统将花费不超过 1/(1+n)的时间进行回收 假设n=99，那么不超过1%时间进行回收。
 -XX:GCTimeRatio
 # 自适应GC策略，自动调整新生代大小，老年代晋年龄等 区别于ParNew是Paraller独有
--XX:UseAdaptiveSizePolicy
+-XX:+UseAdaptiveSizePolicy
 ```
 
 ---
@@ -106,9 +106,9 @@ CMS(`Concurrent Mark Sweep`)收集器是一种以获取`最短回收停顿时间
 
 ##### 收集流程
 
-- 初始标记(并行)
+- 初始标记
 
-此阶段仅`标记GC Roots能直接关联到的对象`。仍需要停顿用户线程(STW)。
+此阶段仅`标记GC Roots能直接关联到的对象`。需要停顿用户线程(STW)。
 
 - 并发标记(并发)
 
@@ -140,7 +140,7 @@ CMS(`Concurrent Mark Sweep`)收集器是一种以获取`最短回收停顿时间
 -XX:CMSInitiatingOccupancyFraction=68
 ```
 
->如果预留的内存不够用户线程分配新对象，那么会执行后备方案：启用`Serial Old`进行`Full GC`。
+>如果预留的内存不够用户线程分配新对象，会启用`Serial Old`进行`Major GC`。会带来较长的停顿时间。
 
 - 产生大量空间碎片
 
@@ -148,8 +148,85 @@ CMS(`Concurrent Mark Sweep`)收集器是一种以获取`最短回收停顿时间
 
 ```bash
 # 默认开启，当CMS进行Full GC时开启内存碎片合并整理的过程 JDK9废弃
--XX:UseCMSCompactAtFullCollection
+-XX:+UseCMSCompactAtFullCollection
 # CMS在执行若干次不整理空间的Full GC后，下一次进行随便整理 JDK9废弃
 -XX:CMSFullGCBeforeCompaction
 ```
+
+> Full GC：对整个Java堆进行回收，包含新生代和老年代
+>
+> Minor GC：对新生代进行回收。
+>
+> Major GC：对老年代进行回收。
+
+#### G1收集器
+
+#### 概念
+
+`G1(Garbage First)收集器`开创了面向`局部收集的设计思路`和`基于Region的内存布局形式`。目的是为了实现支持`停顿时间模型`的收集器。基于`标记-整理`算法。
+
+> 停顿时间模型：支持指定在一个长度为M毫秒的时间片段内，消耗在垃圾收集上的时间不超过N毫秒。
+
+相比于其他收集器要么面向新生代，要么面向老年代，而G1面向堆内存任何部分来组成`回收集(Collection Set)`进行回收。衡量标准由属于哪个分代变为哪块内存垃圾最多，回收收益最大。
+
+相比于之前的固定大小和数量的区域划分的收集器，G1将堆内存分为`多个大小相等的独立区域(Region，默认分成2048份)`，每个`Region`可以根据需要扮演`Eden、Survivor或老年代空间`。
+
+`Region`中还存在一类特殊的`Humongous`区域，用于存储大对象，G1认为只要大小超过一个`Region`容量一般的对象即为大对象，对于超过`Region`大小的对象，将会被存放在N个连续的`Humongous`区域中。
+
+```bash
+# 设置Region的大小(单位： B)，在[1MB,32MB]必须为2的幂次方
+# 设置Region的大小=2097152B=2MB，不设置默认是1MB
+-XX:G1HeapRegionSize=2097152
+```
+
+G1仍然保留新生代、老年代的概念，当它们不再是固定的区域了，改为`一系列区域(不需要连续)的动态集合`。G1在后台维护一个`优先级列表`，每次根据用户通过`-XX:MaxGCPauseMillis`指定的停顿时长`(默认200ms)`，优先回收价值收益最大的`Region`，以达到最大的收集效率。
+
+#### 收集流程
+
+- 初始标记
+
+和CMS类似，标记`GC Roots`直接关联的对象，此阶段会产生`STW`。
+
+- 并发标记(并发)
+
+基于`初始标记`，从`GC Roots`开始对堆中对象进行可达性分析，并`递归扫描整个对象图`，找出可回收对象，此过程可与用户程序并发执行。
+
+- 最终标记(并行)
+
+对用户线程做另一个短暂的暂停，通过`原始快照SATB`处理并发标记导致的并发可达性问题（上章分析过）。
+
+- 筛选回收(并行)
+
+负责更新`Region`的统计数据，并按照回收价值和成本进行排序，根据用户期望的`停顿时间`来指定回收计划。可见多个`Region`合并成`回收集(Collection Set)`，将回收的`Region`中的对象移到空的`Region`，再清理旧的`Region`，设计到对象的移动(体现`标记-整理`算法)，此阶段`用户线程暂停`，`多条收集器线程并行`完成。
+
+#### G1vsCMS
+
+- 优势
+  - 指定最大停顿时间
+  - 不会产生内存空间碎片
+- 劣势
+  - 并发执行带来的较高的内存占用和负载
+  - 每个`Region`都持有一份`卡表`导致堆内存的消耗。
+
+---
+
+###  收集器参数总结
+
+#### 收集器选择参数
+
+| 参数                              | 新生代            | 老年代       |
+| --------------------------------- | ----------------- | ------------ |
+| -XX:+UseSerialGC                  | Serial            | Serial Old   |
+| -XX:+UseParallelGC(JDK8默认)      | Parallel Scavenge | Parallel Old |
+| -XX:+UseParNewGC(JDK8过期)        | ParNew            | Serial Old   |
+| -XX:+UseConcMarkSweepGC(JDK9过期) | ParNew            | CMS          |
+| -XX:UseG1GC                       | G1                | G1           |
+
+#### 收集器相关参数
+
+| 收集器            | 相关参数                                                     | 注释                                                         |
+| ----------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| ParNew & Parallel | -XX:ParallelGCThreads                                        | 指定并行回收线程数；<br>`cores<8? cores:3+((5*cores))/8)`    |
+| ParNew            | -XX:ParallelGCThreads<br>-XX:MaxGCPauseMillis=n<br>-XX:GCTimeRatio<br>-XX:+UseAdaptiveSizePolicy | 指定并行回收线程数<br>最大回收停顿时长<br>吞吐量大小；不花费超过`1/1+n`时间回收<br>自适应GC策略，自动eden,s区大小 |
+|                   |                                                              |                                                              |
 
