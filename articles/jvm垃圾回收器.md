@@ -116,7 +116,7 @@ CMS(`Concurrent Mark Sweep`)收集器是一种以获取`最短回收停顿时间
 
 - 重新标记(并行)
 
-该阶段是为了修正并发标记期间，因`用户程序继续运作而导致标记产生变动的那部分对象`的标记记录。
+该阶段是为了修正并发标记期间，因用户程序继续运作而导致标记产生变动的那部分对象的标记记录。CMS是使用`增量更新`来解决并发标记产生的问题。
 
 - 并发清除(并发)
 
@@ -149,7 +149,7 @@ CMS(`Concurrent Mark Sweep`)收集器是一种以获取`最短回收停顿时间
 ```bash
 # 默认开启，当CMS进行Full GC时开启内存碎片合并整理的过程 JDK9废弃
 -XX:+UseCMSCompactAtFullCollection
-# CMS在执行若干次不整理空间的Full GC后，下一次进行随便整理 JDK9废弃
+# CMS在执行若干次不整理空间的Full GC后，下一次进行碎片整理 JDK9废弃
 -XX:CMSFullGCBeforeCompaction
 ```
 
@@ -171,7 +171,7 @@ CMS(`Concurrent Mark Sweep`)收集器是一种以获取`最短回收停顿时间
 
 相比于之前的固定大小和数量的区域划分的收集器，G1将堆内存分为`多个大小相等的独立区域(Region，默认分成2048份)`，每个`Region`可以根据需要扮演`Eden、Survivor或老年代空间`。
 
-`Region`中还存在一类特殊的`Humongous`区域，用于存储大对象，G1认为只要大小超过一个`Region`容量一般的对象即为大对象，对于超过`Region`大小的对象，将会被存放在N个连续的`Humongous`区域中。
+`Region`中还存在一类特殊的`Humongous`区域，用于存储大对象，G1认为只要大小超过一个`Region`容量一半的对象即为大对象，对于超过`Region`大小的对象，将会被存放在N个连续的`Humongous`区域中。
 
 ```bash
 # 设置Region的大小(单位： B)，在[1MB,32MB]必须为2的幂次方
@@ -210,23 +210,65 @@ G1仍然保留新生代、老年代的概念，当它们不再是固定的区域
 
 ---
 
-###  收集器参数总结
+### 对象在堆中的分配
 
-#### 收集器选择参数
+前面我们了解到，`大部分`的对象都是在`堆中`进行内存分配，但堆中又存在多个逻辑区域(新生代、老年代)，所以这章我们就要讨论下，对象在堆中的进行内存分配的基本原则。
 
-| 参数                              | 新生代            | 老年代       |
-| --------------------------------- | ----------------- | ------------ |
-| -XX:+UseSerialGC                  | Serial            | Serial Old   |
-| -XX:+UseParallelGC(JDK8默认)      | Parallel Scavenge | Parallel Old |
-| -XX:+UseParNewGC(JDK8过期)        | ParNew            | Serial Old   |
-| -XX:+UseConcMarkSweepGC(JDK9过期) | ParNew            | CMS          |
-| -XX:UseG1GC                       | G1                | G1           |
+#### TLAB
 
-#### 收集器相关参数
+在讨论对象分配前，我们需要对之前引入的`TLAB`的概念进一步解析。`TLAB(本地线程缓冲)`，其存在的目的是为了加速对象的分配，即每个线程都拥有自己的专属区域进行对象分配，来避免多线程冲突，默认是启动的。
 
-| 收集器            | 相关参数                                                     | 注释                                                         |
-| ----------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| ParNew & Parallel | -XX:ParallelGCThreads                                        | 指定并行回收线程数；<br>`cores<8? cores:3+((5*cores))/8)`    |
-| ParNew            | -XX:ParallelGCThreads<br>-XX:MaxGCPauseMillis=n<br>-XX:GCTimeRatio<br>-XX:+UseAdaptiveSizePolicy | 指定并行回收线程数<br>最大回收停顿时长<br>吞吐量大小；不花费超过`1/1+n`时间回收<br>自适应GC策略，自动eden,s区大小 |
-|                   |                                                              |                                                              |
+```bash
+# 开/关TLAB
+-XX:+/-UseTLAB
+# 设置TLAB大小
+-XX:TLABSize
+# 查看TLAB信息
+-XX:+PrintTLAB
+# 对象占TLAB空间的比例，大于此比例堆中分配，小于就废弃当前
+## TLAB区域，并新建一个TLAB存放，默认64
+-XX:TLABRefillWasteFraction=64
+# 默认情况TLAB和refill_waste是动态的，关闭TLAB动态调整
+-XX:-ResizeTLAB
+```
 
+> 我们假设TLAB大小为100KB，第一次分配给对象80KB，此时还剩20KB，如果第二次有30KB大小的对象需要分配，此时有两种选择：
+>
+> 1. 废弃所剩的20KB区域，新建一个TLAB存放30KB的对象。
+> 2. 将30KB对象分配在堆上，保留所剩的20KB区域，等到下次有小于20KB对象分配时再使用该区域。
+>
+> `-XX:TLABRefillWasteFraction=64`，即允许TLAB空间浪费的比例，当`对象/TLAB的比例`大于64，对象在堆中分配，小于64则会开辟新TLAB存放。
+
+#### 一般在eden中分配
+
+大部分情况下，`对象在Eden区中进行分配`，如果`Eden区`空间不够，JVM会发起一次`Minor GC`。
+
+#### 大对象进入老年代
+
+`大对象：需要大量连续内存空间的Java对象`或新生代已无足够空间分配的对象直接进入老年代。
+
+```bash
+# 将大于此大小的对象直接分配到老年代
+-XX:PretenureSizeThreshold=5242880(5mb)
+```
+
+> 只适用于`Serial、Serial Old、ParNew`三种收集器。
+
+#### 长期存活对象进入老年代
+
+长期存活的对象将进入老年代。对象通常在eden区诞生，如果经历了一次`Minor Gc`后仍然存活，并能够被`s0`容纳，该对象会被移动到`s0`区并将其`对象头中的对象年龄 + 1`。当年龄达到阈值，就会进入老年代。
+
+```bash
+# 对象晋升到老年代的年龄阈值
+-XX:MaxTenuringThreshold=15
+```
+
+> `动态对象年龄判断`：
+>
+> JVM不是永远要求对象年龄达到`-XX:MaxTenuringThreshold`指定的值才能晋升老年代：
+>
+> 如果`s0中相同年龄的对象大小总`和大于s0区域的一半`(-XX:TargetSurvivorRatio决定，默认50)`，那么`大于等于该年龄的对象`就会进入老年代。
+
+#### 总结
+
+对象的内存分配流程需要经历`栈上分配 -> TLAB分配 -> 是否进入老年代 -> 最终eden分配`。
