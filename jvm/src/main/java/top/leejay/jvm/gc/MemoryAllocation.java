@@ -16,6 +16,7 @@ public class MemoryAllocation {
      * -XX:SurvivorRatio=8(默认)
      * eden: 8m so/s1: 1m
      * old: 10m
+     * RedLock 分布式事务 分布式ID 雪花算法 布隆过滤器 分布式锁 RPC
      */
     private static final int _1MB = 1024 * 1024;
 

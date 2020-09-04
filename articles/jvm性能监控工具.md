@@ -205,6 +205,18 @@ public class JConsoleThread {
 
 ---
 
+#### visualvm
+
+<a href="https://visualvm.github.io">visualvm</a>是功能最强大的运行监视和故障处理程序之一，不需要被监视的程序基于`Agent`去运行。
+
+![](https://image.leejay.top/image/20200903/zMgfGP8OccEu.png?imageslim)
+
+> 可以查看JVM参数、System参数、线程Dump、堆Dump、包括性能监控、垃圾分代、插件等功能。
+>
+> Idea的plugin仓库有`visualvm`的插件，可以一键启动visualvm。
+
+---
+
 #### jcmd & jhsdb
 
 `jcmd & jhsdb`是JDK提供的两个集成的多功能工具箱。能够实现前面提到的绝大部分的功能。
