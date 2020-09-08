@@ -3,7 +3,7 @@ package top.leejay.jvm.load;
 /**
  * @author xiaokexiang
  */
-public class Array {
+public class Array extends ClassLoader {
     static {
         System.out.println("Array init ...");
     }
