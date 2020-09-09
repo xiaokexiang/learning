@@ -121,7 +121,7 @@ class Test {
 
 - 通过一个类的全限定名获取定义此类的二进制字节流。
 
-> 《Java虚拟机规范》没有规定`二进制字节流`的具体获取方式，目前已知获取方式包括：`从zip包读取、运行时生成、加密文件获取等`。既可以通过`Java虚拟机内置的类加载器`，也可以通过`用户自定义的类加载器`来实现自定义的二进制字节流获取方式。
+> 《Java虚拟机规范》没有规定`二进制字节流`的具体获取方式，目前已知获取方式包括：`从zip包读取、运行时生成、加密文件获取等`。既可以通过`Java虚拟机内置的类加载器`，也可以通过`用户自定义的类加载器`来实现类的加载动作（类来源的多样性需要自定义类加载器）。
 >
 > 数组本身不通过类加载器创建，但`数组的类型`需要通过类加载器来完成加载。
 
@@ -281,4 +281,224 @@ public class Test1 {
 ---
 
 ### 3.类加载器
+
+类加载阶段的`通过一个类的全限定名来获取描述该类的二进制字节流`这个动作交给Java虚拟机外部去实现，让应用程序决定如何去获取所需的类，实现这个动作的代码被称为`类加载器(Class Loader)`。类加载器用于实现`类的加载动作`。
+
+> 判断两个类是否相等，前提是由`同一个类加载器`加载。不同类加载器加载同一个.class文件也是不相等的。
+
+```java
+public class ClassLoaderTest {
+    public static void main(String[] args) throws Exception {
+        // 自定义类加载器,匿名内部类
+        ClassLoader classLoader = new ClassLoader() {
+            @Override
+            public Class<?> loadClass(String name) throws ClassNotFoundException {
+                try {
+                    String fileName = 
+                        name.substring(name.lastIndexOf(".") + 1) + ".class";
+                    // 使用当前自定义类加载来加载fileName的类为二进制字节流
+                    InputStream inputStream = 
+                        getClass().getResourceAsStream(fileName);
+                    // 如果找不到就让父类加载器去执行加载
+                    if (null == inputStream) {
+                        return super.loadClass(name);
+                    }
+                    byte[] bytes = new byte[inputStream.available()];
+                    inputStream.read(bytes);
+                    // 创建name的Class对象
+                    return defineClass(name, bytes, 0, bytes.length);
+                } catch (IOException e) {
+                    throw new ClassNotFoundException(name);
+                }
+            }
+        };
+        // 通过自定义类加载器实现类的加载，并实例化该对象
+        Object obj = 
+            classLoader.loadClass("top.leejay.jvm.load.ClassLoaderTest")
+            .newInstance();
+        // 查看加载的Class对象
+        System.out.println(obj.getClass());
+        // 验证不同的类加载器加载同一个.class文件是否相同
+        System.out.println(obj instanceof ClassLoaderTest);// false
+    }
+}
+```
+
+> 此时在Java虚拟机中共存在两个`ClassLoaderTest`类，一个是`应用程序类加载器`加载的，一个是`自定义类加载`加载的。
+
+#### 双亲委派模型
+
+![](https://image.leejay.top/image/20200909/tcECLtcm1kv0.png?imageslim)
+
+> 上图各种类加载器之间的层次关系被称为`类加载器的双亲委派模型`。双亲委派模型要求：除了顶层的启动类加载器外，其余的类加载器都应有自己的父类加载器(继承自`java.lang.ClassLoader`类)。
+>
+> 如果一个类加载器收到了类加载的请求，它首先不会自己去尝试加载该类，而是把这个请求委派给父加载器去执行，每个层次都是如此，最终所有的请求都传递到`最顶层的启动类加载器`中。只有当`父加载器无法完成这个加载请求`时，子加载才会尝试自己去完成加载。
+
+- 启动类加载器
+
+负责加载`JAVA_HOME/lib`目录下，能被Java虚拟机识别的类库。由`C++`实现。Java中用`null`来表示。
+
+- 扩展类加载器
+
+负责加载`JAVA_HOME/lib/ext`目录下的类库。由`Java`实现。
+
+- 应用程序加载器
+
+因为是`ClassLoader.getSystemClassLoader`的返回值，又被称为系统类加载器。负责加载用户类路径(ClassPath)上所有的类库。
+
+##### 不同类加载器加载同一个.class文件
+
+```java
+protected Class<?> loadClass(String name, boolean resolve)
+        						throws ClassNotFoundException {
+    synchronized (getClassLoadingLock(name)) {
+        // 判断类是否被加载
+        Class<?> c = findLoadedClass(name);
+        // 如果没有被加载
+        if (c == null) {
+            long t0 = System.nanoTime();
+            try {
+                // 如果当前类加载器的父类不为null，说明存在父加载器
+                // 如果为null，说明加载到顶层的启动类加载器了(Java中为null)
+                if (parent != null) {
+                    // 调用父类的类加载器加载类，往上查找
+                    c = parent.loadClass(name, false);
+                } else {
+                    // 如果为null，那么调用顶层的启动类加载器来加载
+                    c = findBootstrapClassOrNull(name);
+                }
+            } catch (ClassNotFoundException e) {
+                // 如果父加载器没找到，那么会抛出该异常，默认不处理
+            }
+			// 如果c=null，说明启动类加载器也没找到这个类
+            // 那么会直接调用本身的findClass方法
+            if (c == null) {
+                long t1 = System.nanoTime();
+                // 调用findClass，从上往下查找
+                c = findClass(name);
+            }
+        }
+        if (resolve) {
+            resolveClass(c);
+        }
+        return c;
+    }
+}
+```
+
+> 判断请求加载的类型是否被加载过，如果没有则调用父加载器的`loadClass()`，若父加载器为`null`则默认使用`启动类加载器`作为自己的父加载器。若父加载器加载失败，抛出`ClassNotFound`异常后，就会调用自身的`findClass`方法尝试进行加载。
+
+##### 双亲委派的优点
+
+- 避免`类重复加载`。加载类都会先判断这个是否被加载过。
+- 避免`核心类`被篡改。如果用户自定义了`java.lang.Object`类，就无法保证最基本的行为。
+
+##### 破坏双亲委派
+
+- 历史遗留原因
+
+<u>类加载器和ClassLoader抽象类</u>在`JDK1`中就存在，而<u>双亲委派模型</u>在`JDK1.2`才出现，为了面对已经存在的用户自定义类加载器的代码而做出妥协，加入了`protected Class<?> findClass()`方法，结合`ClassLoader`的源码，当`loadClass`加载失败，就会调用自身的`findClass`方法。
+
+- JNDI
+
+我们知道`JNDI`的代码由启动类加载器加载，但`JNDI`需要对调用部署在应用程序的`ClassPath`下的`JNDI`服务提供者接口，简单来说就是`顶层启动类加载器需要加载应用程序类加载器`，此问题会破坏双亲委派模型。
+
+解决办法：引入线程上下文类加载器，如果创建线程时还未设置，它会从父线程中继承一个，如果在应用程序的全局范围内都没有设置的话，那么这个类加载器默认是`应用程序类加载器`。
+
+#### 正确编写自定义类加载器
+
+在前面我们编写了`"糟糕"`的自定义类加载器代码来验证`不同的类加载器加载同一个.class文件是不相等的`。那么这节我们按照`JDK1.2`后建议我们使用的`findClass`来编写自定义类加载器。
+
+```java
+public class MyClassLoader extends ClassLoader {
+
+    @Override
+    protected Class<?> findClass(String name) {
+        // 先判断类是否已被加载
+        Class<?> c = findLoadedClass(name);
+        if (null == c) {
+            try {
+                // 加载本地磁盘上指定name的class文件(只要不在ClassPath下即可)
+                FileInputStream inputStream = 
+                    new FileInputStream(new File("D://" + name + ".class"));
+                ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+                byte[] bytes = new byte[inputStream.available()];
+                int index;
+                while ((index = inputStream.read(bytes)) != -1) {
+                    outputStream.write(bytes, 0, index);
+                }
+                // 获取字节流
+                byte[] byteArray = outputStream.toByteArray();
+                // 创建name的Class对象
+                c = defineClass(name, byteArray, 0, byteArray.length);
+            } catch (IOException e) {
+                throw new ClassNotFoundException(name);
+            }
+        }
+        return c;
+    }
+}
+
+public class ClassLoaderTest {
+    public static void main(String[] args) throws ClassNotFoundException {
+        MyClassLoader loader = new MyClassLoader();
+        Class<?> hello = loader.loadClass("Hello");
+        // top.leejay.jvm.load.MyClassLoader@4fccd51b
+        System.out.println(hello.getClassLoader());
+    }
+}
+```
+
+> 1. D盘下创建一个名为`Hello`的java文件，`javac -encoding utf-8 Hello.java`生成class文件。
+> 2. 切记`Hello.class`文件不能在`ClassPath`下，否则会导致`AppClassLoader`加载该类。
+> 3. 自定义类加载器的`loadClass`方法为入口，在三个默认类加载器都找不到时会调用`findClass`。
+
+#### 小知识点
+
+`Class.forName()`与`ClassLoader.loadClass()`的区别？
+
+先说结论：
+
+1. `forName`除了`加载.class文件`外，还会执行该类的`初始化`，即执行类的`<clinit>`方法，所以`类的静态代码块`和`静态变量赋值操作`都会执行。
+2. `loadClass`只会将`.class文件`加载到虚拟机中，不会执行初始化操作。
+
+```java
+@CallerSensitive
+public static Class<?> forName(String className)
+    	throws ClassNotFoundException {
+    Class<?> caller = Reflection.getCallerClass();
+    /**
+      * @param 要加载的类名
+      * @param 是否需要初始化 true/false 初始化/不初始化
+      * @param 调用者类加载器
+      * @param 调用者Class对象
+      */ 
+    return forName0(className, true, ClassLoader.getClassLoader(caller), caller);
+}
+```
+
+```java
+public class ClassDemo {
+    static int value = 0;
+    static {
+        System.out.println("static ...");
+        value = 1;
+        System.out.println(value);
+    }
+}
+
+class Test {
+    public static void main(String[] args) throws ClassNotFoundException {
+        // 初始化
+        Class<?> aClass1 = 
+            Class.forName("top.leejay.jvm.load.ClassDemo");
+        // 不会初始化
+        Class<?> aClass2 = ClassLoader.getSystemClassLoader()
+            .loadClass("top.leejay.jvm.load.ClassDemo");
+    }
+}
+
+```
+
+---
 
