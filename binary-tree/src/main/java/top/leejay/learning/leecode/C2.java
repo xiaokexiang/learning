@@ -1,4 +1,4 @@
-package top.leejay.learning.entity;
+package top.leejay.learning.leecode;
 
 public class C2 {
 

@@ -1,4 +1,4 @@
-package top.leejay.learning.entity;
+package top.leejay.learning.leecode;
 
 public class C3 {
     public boolean isPalindrome(int x) {

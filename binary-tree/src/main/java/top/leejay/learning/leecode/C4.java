@@ -1,4 +1,4 @@
-package top.leejay.learning.entity;
+package top.leejay.learning.leecode;
 
 import java.util.HashMap;
 import java.util.Map;
