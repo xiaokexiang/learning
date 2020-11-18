@@ -1,10 +1,10 @@
 package top.leejay.datasource;
 
-import io.spring.database.datasource.annotation.ConditionalOnDriver;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Condition;
 import org.springframework.context.annotation.ConditionContext;
 import org.springframework.core.type.AnnotatedTypeMetadata;
+import top.leejay.datasource.annotation.ConditionalOnDriver;
 
 import java.util.Map;
 import java.util.Optional;
