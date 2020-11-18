@@ -1,0 +1,9 @@
+spring:
+  datasource:
+    username: bocloud
+    password: a@!#123
+    url: jdbc:mysql://172.19.18.161:3316/nacha_auth?characterEncoding=utf8&allowMultiQueries=true&&zeroDateTimeBehavior=convertToNull
+  application:
+    name: spring-cloud-database
+server:
+  port: 7003
